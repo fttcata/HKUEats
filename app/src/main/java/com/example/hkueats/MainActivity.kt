@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -43,22 +44,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.example.hkueats.data.Restaurant
+import com.example.hkueats.data.RestaurantRepository
 import com.example.hkueats.ui.theme.HKUEatsTheme
-
-data class Restaurant(
-    val name: String,
-    val cuisine: String,
-    val location: String,
-    val rating: Double,
-    val price: String,
-)
-
-private val sampleRestaurants = listOf(
-    Restaurant("Jaspas Beach Club", "Western", "Pok Fu Lam", 4.4, "$$"),
-    Restaurant("Mido Cafe", "Hong Kong", "Sai Ying Pun", 4.2, "$"),
-    Restaurant("The Caffeine Laboratory", "Cafe", "Kennedy Town", 4.6, "$$"),
-    Restaurant("Wang Fu", "Chinese", "HKU Main Campus", 4.1, "$"),
-)
 
 private enum class Screen { Login, Home, Details, AddRestaurant, Account }
 
@@ -91,7 +79,7 @@ private fun HKUEatsApp() {
             onNavigate = { screen = it },
             content = {
                 RestaurantDetailsScreen(
-                    restaurant = selectedRestaurant ?: sampleRestaurants.first(),
+                    restaurant = selectedRestaurant ?: RestaurantRepository.restaurants.first(),
                     onBack = { screen = Screen.Home },
                 )
             },
@@ -187,10 +175,16 @@ private fun LoginScreen(onLogin: () -> Unit) {
 private fun HomeScreen(onRestaurantClick: (Restaurant) -> Unit) {
     var query by remember { mutableStateOf("") }
     var selectedCuisine by remember { mutableStateOf("All") }
+    var selectedLocation by remember { mutableStateOf("All") }
     val cuisines = listOf("All", "Western", "Chinese", "Cafe", "Hong Kong")
-    val restaurants = sampleRestaurants.filter {
+    val locations = listOf("All", "HKU Main Campus", "Pok Fu Lam", "Sai Ying Pun", "Kennedy Town")
+    val restaurants = RestaurantRepository.restaurants.filter {
         (selectedCuisine == "All" || it.cuisine == selectedCuisine) &&
-            (query.isBlank() || it.name.contains(query, ignoreCase = true))
+            (selectedLocation == "All" || it.location == selectedLocation) &&
+            (query.isBlank() ||
+                it.name.contains(query, ignoreCase = true) ||
+                it.cuisine.contains(query, ignoreCase = true) ||
+                it.location.contains(query, ignoreCase = true))
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Text("Good afternoon!", style = MaterialTheme.typography.headlineMedium)
@@ -204,7 +198,11 @@ private fun HomeScreen(onRestaurantClick: (Restaurant) -> Unit) {
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 12.dp)) {
+        Text("Cuisine", style = MaterialTheme.typography.labelLarge)
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(vertical = 8.dp),
+        ) {
             cuisines.forEach { cuisine ->
                 FilterChip(
                     selected = selectedCuisine == cuisine,
@@ -213,8 +211,30 @@ private fun HomeScreen(onRestaurantClick: (Restaurant) -> Unit) {
                 )
             }
         }
+        Text("Location", style = MaterialTheme.typography.labelLarge)
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(vertical = 8.dp),
+        ) {
+            locations.forEach { location ->
+                FilterChip(
+                    selected = selectedLocation == location,
+                    onClick = { selectedLocation = location },
+                    label = { Text(location) },
+                )
+            }
+        }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(restaurants) { restaurant ->
+            if (restaurants.isEmpty()) {
+                item {
+                    Text(
+                        "No restaurants match these filters.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(vertical = 24.dp),
+                    )
+                }
+            }
+            items(restaurants, key = { it.name }) { restaurant ->
                 RestaurantCard(restaurant, onClick = { onRestaurantClick(restaurant) })
             }
         }
@@ -252,7 +272,7 @@ private fun RestaurantDetailsScreen(restaurant: Restaurant, onBack: () -> Unit) 
                 Text("${restaurant.cuisine} · ${restaurant.price}", style = MaterialTheme.typography.titleMedium)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("★ ${restaurant.rating}", style = MaterialTheme.typography.headlineSmall)
-                    Text("  Based on student reviews")
+                    Text("  Based on ${restaurant.reviews.size} student reviews")
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 12.dp)) {
                     Icon(Icons.Default.LocationOn, contentDescription = null)
@@ -262,9 +282,12 @@ private fun RestaurantDetailsScreen(restaurant: Restaurant, onBack: () -> Unit) 
                 Spacer(Modifier.height(16.dp))
                 Text("Recent reviews", style = MaterialTheme.typography.titleLarge)
             }
-            items(listOf("Great value and friendly staff.", "A convenient option after class.")) { review ->
+            items(restaurant.reviews) { review ->
                 Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                    Text("Anonymous HKU student\n★ 4.0\n$review", Modifier.padding(12.dp))
+                    Text(
+                        "${review.author}\n★ ${review.rating}\n${review.comment}",
+                        Modifier.padding(12.dp),
+                    )
                 }
             }
         }
