@@ -4,6 +4,8 @@ data class Review(
     val author: String,
     val rating: Double,
     val comment: String,
+    val visitDate: String = "",
+    val imageUri: String? = null,
 )
 
 data class Restaurant(
@@ -16,7 +18,7 @@ data class Restaurant(
 )
 
 object RestaurantRepository {
-    val restaurants = listOf(
+    val restaurants = mutableListOf(
         Restaurant(
             name = "Jaspas Beach Club",
             cuisine = "Western",
@@ -62,4 +64,29 @@ object RestaurantRepository {
             ),
         ),
     )
+
+    fun addReview(
+        restaurantName: String,
+        rating: Double,
+        comment: String,
+        visitDate: String,
+        imageUri: String?,
+    ): Restaurant? {
+        val index = restaurants.indexOfFirst { it.name == restaurantName }
+        if (index == -1) return null
+
+        val restaurant = restaurants[index]
+        val updatedReviews = restaurant.reviews + Review(
+            author = "You",
+            rating = rating,
+            comment = comment,
+            visitDate = visitDate,
+            imageUri = imageUri,
+        )
+        val updatedRating = updatedReviews.map { it.rating }.average()
+        return restaurant.copy(
+            rating = updatedRating,
+            reviews = updatedReviews,
+        ).also { restaurants[index] = it }
+    }
 }
