@@ -1,8 +1,11 @@
 package com.example.hkueats
 
+import android.app.DatePickerDialog
 import android.os.Bundle
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -42,13 +45,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 import com.example.hkueats.data.Restaurant
 import com.example.hkueats.data.RestaurantRepository
 import com.example.hkueats.ui.theme.HKUEatsTheme
 
-private enum class Screen { Login, Home, Details, AddRestaurant, Account }
+private enum class Screen { Login, Home, Details, AddReview, AddRestaurant, Account }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,6 +88,22 @@ private fun HKUEatsApp() {
                 RestaurantDetailsScreen(
                     restaurant = selectedRestaurant ?: RestaurantRepository.restaurants.first(),
                     onBack = { screen = Screen.Home },
+                    onWriteReview = { screen = Screen.AddReview },
+                )
+            },
+        )
+        Screen.AddReview -> AppScaffold(
+            screen = screen,
+            onNavigate = { screen = it },
+            content = {
+                ReviewScreen(
+                    restaurantName = selectedRestaurant?.name
+                        ?: RestaurantRepository.restaurants.first().name,
+                    onBack = { screen = Screen.Details },
+                    onSubmitted = { restaurant ->
+                        selectedRestaurant = restaurant
+                        screen = Screen.Details
+                    },
                 )
             },
         )
@@ -107,7 +130,7 @@ private fun AppScaffold(
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(
-                    selected = screen == Screen.Home || screen == Screen.Details,
+                    selected = screen == Screen.Home || screen == Screen.Details || screen == Screen.AddReview,
                     onClick = { onNavigate(Screen.Home) },
                     icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
                     label = { Text("Explore") },
@@ -257,7 +280,11 @@ private fun RestaurantCard(restaurant: Restaurant, onClick: () -> Unit) {
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun RestaurantDetailsScreen(restaurant: Restaurant, onBack: () -> Unit) {
+private fun RestaurantDetailsScreen(
+    restaurant: Restaurant,
+    onBack: () -> Unit,
+    onWriteReview: () -> Unit,
+) {
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text(restaurant.name) },
@@ -278,18 +305,128 @@ private fun RestaurantDetailsScreen(restaurant: Restaurant, onBack: () -> Unit) 
                     Icon(Icons.Default.LocationOn, contentDescription = null)
                     Text("  ${restaurant.location}")
                 }
-                Button(onClick = {}, modifier = Modifier.fillMaxWidth()) { Text("Write a review") }
+                Button(onClick = onWriteReview, modifier = Modifier.fillMaxWidth()) { Text("Write a review") }
                 Spacer(Modifier.height(16.dp))
                 Text("Recent reviews", style = MaterialTheme.typography.titleLarge)
             }
             items(restaurant.reviews) { review ->
                 Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                    Text(
-                        "${review.author}\n★ ${review.rating}\n${review.comment}",
-                        Modifier.padding(12.dp),
-                    )
+                    Column(Modifier.padding(12.dp)) {
+                        Text(review.author, style = MaterialTheme.typography.titleMedium)
+                        Text("★ ${review.rating}", style = MaterialTheme.typography.bodyLarge)
+                        if (review.visitDate.isNotBlank()) {
+                            Text("Visited ${review.visitDate}", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(review.comment, Modifier.padding(top = 4.dp))
+                        if (review.imageUri != null) {
+                            Text("Photo attached", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun ReviewScreen(
+    restaurantName: String,
+    onBack: () -> Unit,
+    onSubmitted: (Restaurant) -> Unit,
+) {
+    var rating by remember { mutableStateOf(0) }
+    var comment by remember { mutableStateOf("") }
+    var visitDate by remember { mutableStateOf("") }
+    var imageUri by remember { mutableStateOf<String?>(null) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        imageUri = uri?.toString()
+    }
+
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        TopAppBar(
+            title = { Text("Write a review") },
+            navigationIcon = {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                }
+            },
+        )
+        Text(restaurantName, style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(16.dp))
+        Text("Your rating", style = MaterialTheme.typography.labelLarge)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.padding(vertical = 8.dp),
+        ) {
+            (1..5).forEach { value ->
+                FilterChip(
+                    selected = rating == value,
+                    onClick = { rating = value },
+                    label = { Text("$value ★") },
+                )
+            }
+        }
+        OutlinedTextField(
+            value = comment,
+            onValueChange = { comment = it },
+            label = { Text("Comment") },
+            minLines = 4,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = {
+                val calendar = Calendar.getInstance()
+                DatePickerDialog(
+                    context,
+                    { _, year, month, day ->
+                        calendar.set(year, month, day)
+                        visitDate = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(calendar.time)
+                    },
+                    calendar.get(Calendar.YEAR),
+                    calendar.get(Calendar.MONTH),
+                    calendar.get(Calendar.DAY_OF_MONTH),
+                ).show()
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (visitDate.isBlank()) "Select visit date" else "Visit date: $visitDate")
+        }
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = { imagePicker.launch(arrayOf("image/*")) },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (imageUri == null) "Add an optional photo" else "Photo selected")
+        }
+        errorMessage?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 12.dp))
+        }
+        Spacer(Modifier.height(16.dp))
+        Button(
+            onClick = {
+                when {
+                    rating == 0 -> errorMessage = "Please select a rating."
+                    comment.isBlank() -> errorMessage = "Please enter a comment."
+                    visitDate.isBlank() -> errorMessage = "Please select your visit date."
+                    else -> RestaurantRepository.addReview(
+                        restaurantName = restaurantName,
+                        rating = rating.toDouble(),
+                        comment = comment.trim(),
+                        visitDate = visitDate,
+                        imageUri = imageUri,
+                    )?.let(onSubmitted)
+                }
+            },
+            enabled = rating > 0 && comment.isNotBlank() && visitDate.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Submit review")
         }
     }
 }
