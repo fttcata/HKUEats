@@ -39,9 +39,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,9 +53,12 @@ import androidx.compose.ui.unit.dp
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import kotlinx.coroutines.launch
+import com.example.hkueats.data.AppContainer
 import com.example.hkueats.data.Restaurant
-import com.example.hkueats.data.RestaurantRepository
 import com.example.hkueats.ui.theme.HKUEatsTheme
+
+private val restaurantRepository = AppContainer.restaurantRepository
 
 private enum class Screen { Login, Home, Details, AddReview, AddRestaurant, Account }
 
@@ -68,6 +73,11 @@ class MainActivity : ComponentActivity() {
 private fun HKUEatsApp() {
     var screen by remember { mutableStateOf(Screen.Login) }
     var selectedRestaurant by remember { mutableStateOf<Restaurant?>(null) }
+    var restaurants by remember { mutableStateOf<List<Restaurant>>(emptyList()) }
+
+    LaunchedEffect(Unit) {
+        restaurants = restaurantRepository.getRestaurants()
+    }
 
     when (screen) {
         Screen.Login -> LoginScreen { screen = Screen.Home }
@@ -75,7 +85,7 @@ private fun HKUEatsApp() {
             screen = screen,
             onNavigate = { screen = it },
             content = {
-                HomeScreen { restaurant ->
+                HomeScreen(restaurants) { restaurant ->
                     selectedRestaurant = restaurant
                     screen = Screen.Details
                 }
@@ -85,11 +95,13 @@ private fun HKUEatsApp() {
             screen = screen,
             onNavigate = { screen = it },
             content = {
-                RestaurantDetailsScreen(
-                    restaurant = selectedRestaurant ?: RestaurantRepository.restaurants.first(),
-                    onBack = { screen = Screen.Home },
-                    onWriteReview = { screen = Screen.AddReview },
-                )
+                selectedRestaurant?.let { restaurant ->
+                    RestaurantDetailsScreen(
+                        restaurant = restaurant,
+                        onBack = { screen = Screen.Home },
+                        onWriteReview = { screen = Screen.AddReview },
+                    )
+                }
             },
         )
         Screen.AddReview -> AppScaffold(
@@ -97,11 +109,13 @@ private fun HKUEatsApp() {
             onNavigate = { screen = it },
             content = {
                 ReviewScreen(
-                    restaurantName = selectedRestaurant?.name
-                        ?: RestaurantRepository.restaurants.first().name,
+                    restaurantName = selectedRestaurant?.name.orEmpty(),
                     onBack = { screen = Screen.Details },
                     onSubmitted = { restaurant ->
                         selectedRestaurant = restaurant
+                        restaurants = restaurants.map {
+                            if (it.id == restaurant.id) restaurant else it
+                        }
                         screen = Screen.Details
                     },
                 )
@@ -195,13 +209,16 @@ private fun LoginScreen(onLogin: () -> Unit) {
 }
 
 @Composable
-private fun HomeScreen(onRestaurantClick: (Restaurant) -> Unit) {
+private fun HomeScreen(
+    allRestaurants: List<Restaurant>,
+    onRestaurantClick: (Restaurant) -> Unit,
+) {
     var query by remember { mutableStateOf("") }
     var selectedCuisine by remember { mutableStateOf("All") }
     var selectedLocation by remember { mutableStateOf("All") }
     val cuisines = listOf("All", "Western", "Chinese", "Cafe", "Hong Kong")
     val locations = listOf("All", "HKU Main Campus", "Pok Fu Lam", "Sai Ying Pun", "Kennedy Town")
-    val restaurants = RestaurantRepository.restaurants.filter {
+    val restaurants = allRestaurants.filter {
         (selectedCuisine == "All" || it.cuisine == selectedCuisine) &&
             (selectedLocation == "All" || it.location == selectedLocation) &&
             (query.isBlank() ||
@@ -226,7 +243,7 @@ private fun HomeScreen(onRestaurantClick: (Restaurant) -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(vertical = 8.dp),
         ) {
-            cuisines.forEach { cuisine ->
+            items(cuisines) { cuisine ->
                 FilterChip(
                     selected = selectedCuisine == cuisine,
                     onClick = { selectedCuisine = cuisine },
@@ -239,7 +256,7 @@ private fun HomeScreen(onRestaurantClick: (Restaurant) -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(vertical = 8.dp),
         ) {
-            locations.forEach { location ->
+            items(locations) { location ->
                 FilterChip(
                     selected = selectedLocation == location,
                     onClick = { selectedLocation = location },
@@ -335,6 +352,7 @@ private fun ReviewScreen(
     onBack: () -> Unit,
     onSubmitted: (Restaurant) -> Unit,
 ) {
+    val coroutineScope = rememberCoroutineScope()
     var rating by remember { mutableStateOf(0) }
     var comment by remember { mutableStateOf("") }
     var visitDate by remember { mutableStateOf("") }
@@ -414,13 +432,15 @@ private fun ReviewScreen(
                     rating == 0 -> errorMessage = "Please select a rating."
                     comment.isBlank() -> errorMessage = "Please enter a comment."
                     visitDate.isBlank() -> errorMessage = "Please select your visit date."
-                    else -> RestaurantRepository.addReview(
-                        restaurantName = restaurantName,
-                        rating = rating.toDouble(),
-                        comment = comment.trim(),
-                        visitDate = visitDate,
-                        imageUri = imageUri,
-                    )?.let(onSubmitted)
+                    else -> coroutineScope.launch {
+                        restaurantRepository.addReview(
+                            restaurantName = restaurantName,
+                            rating = rating.toDouble(),
+                            comment = comment.trim(),
+                            visitDate = visitDate,
+                            imageUri = imageUri,
+                        )?.let(onSubmitted)
+                    }
                 }
             },
             enabled = rating > 0 && comment.isNotBlank() && visitDate.isNotBlank(),
@@ -433,6 +453,7 @@ private fun ReviewScreen(
 
 @Composable
 private fun AddRestaurantScreen() {
+    val coroutineScope = rememberCoroutineScope()
     var name by remember { mutableStateOf("") }
     var location by remember { mutableStateOf("") }
     var submitted by remember { mutableStateOf(false) }
@@ -447,7 +468,14 @@ private fun AddRestaurantScreen() {
         OutlinedButton(onClick = {}, modifier = Modifier.fillMaxWidth()) { Text("Use current location") }
         Spacer(Modifier.height(12.dp))
         Button(
-            onClick = { submitted = true },
+            onClick = {
+                coroutineScope.launch {
+                    submitted = restaurantRepository.addRestaurant(
+                        name = name.trim(),
+                        location = location.trim(),
+                    ) != null
+                }
+            },
             enabled = name.isNotBlank() && location.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Submit for review") }
