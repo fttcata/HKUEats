@@ -161,4 +161,6 @@ object AppContainer {
     } else {
         MockRestaurantRepository()
     }
+
+    val userRepository: UserRepository = SupabaseUserRepository()
 }

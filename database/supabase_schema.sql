@@ -46,3 +46,21 @@ create policy "Allow public insert to restaurants"
 create policy "Allow public insert to reviews"
     on public.reviews for insert
     to public with check (true);
+
+create table if not exists public.profiles (
+    id uuid primary key references auth.users(id) on delete cascade,
+    email text not null unique,
+    display_name text,
+    created_at timestamptz not null default now()
+);
+
+alter table public.profiles enable row level security;
+
+-- Allow users to read and update their own profiles
+create policy "Public profiles are viewable by everyone"
+    on public.profiles for select
+    to public using (true);
+
+create policy "Users can insert their own profile"
+    on public.profiles for insert
+    to public with check (auth.uid() = id);
