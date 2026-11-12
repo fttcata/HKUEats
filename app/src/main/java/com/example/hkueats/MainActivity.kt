@@ -56,6 +56,7 @@ import java.util.UUID
 import kotlinx.coroutines.launch
 import com.example.hkueats.data.AppContainer
 import com.example.hkueats.data.Restaurant
+import com.example.hkueats.data.Review
 import com.example.hkueats.ui.theme.HKUEatsTheme
 
 private val restaurantRepository = AppContainer.restaurantRepository
@@ -115,6 +116,7 @@ private fun HKUEatsApp() {
             content = {
                 ReviewScreen(
                     restaurantName = selectedRestaurant?.name.orEmpty(),
+                    currentUserEmail = currentUserEmail, // <--- Pass real logged-in user
                     onBack = { screen = Screen.Details },
                     onSubmitted = { restaurant ->
                         selectedRestaurant = restaurant
@@ -134,7 +136,13 @@ private fun HKUEatsApp() {
         Screen.Account -> AppScaffold(
             screen = screen,
             onNavigate = { screen = it },
-            content = { AccountScreen(currentUserEmail) },
+            content = {
+                AccountScreen(
+                    email = currentUserEmail,
+                    allRestaurants = restaurants, // <--- Pass live restaurant/review data
+                    onSignOut = { screen = Screen.Login }
+                )
+            },
         )
     }
 }
@@ -205,7 +213,6 @@ private fun LoginScreen(onLoginSuccess: (String) -> Unit) {
                     val mockUserId = UUID.randomUUID().toString()
                     val displayName = trimmedEmail.substringBefore("@")
 
-                    // Enforces database domain boundary check (@connect.hku.hk or @hku.hk)
                     val isValidUser = userRepository.handleUserLogin(
                         userId = mockUserId,
                         email = trimmedEmail,
@@ -382,6 +389,7 @@ private fun RestaurantDetailsScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 private fun ReviewScreen(
     restaurantName: String,
+    currentUserEmail: String,
     onBack: () -> Unit,
     onSubmitted: (Restaurant) -> Unit,
 ) {
@@ -468,6 +476,7 @@ private fun ReviewScreen(
                     else -> coroutineScope.launch {
                         restaurantRepository.addReview(
                             restaurantName = restaurantName,
+                            authorEmail = currentUserEmail, // <--- Ties review to real logged-in user
                             rating = rating.toDouble(),
                             comment = comment.trim(),
                             visitDate = visitDate,
@@ -517,16 +526,112 @@ private fun AddRestaurantScreen() {
 }
 
 @Composable
-private fun AccountScreen(email: String) {
+private fun AccountScreen(
+    email: String,
+    allRestaurants: List<Restaurant>,
+    onSignOut: () -> Unit
+) {
     val userHandle = email.substringBefore("@").replaceFirstChar { it.uppercase() }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Account and settings", style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(20.dp))
-        Text(userHandle, style = MaterialTheme.typography.titleLarge)
-        Text(email, style = MaterialTheme.typography.bodyLarge)
-        Spacer(Modifier.height(24.dp))
-        Text("Your reviews", style = MaterialTheme.typography.titleMedium)
-        Text("Your submitted reviews and account profile are securely synced with your Supabase PostgreSQL database.")
+    // Filter all reviews across all restaurants to find ones written by this user
+    val userReviews: List<Pair<String, Review>> = remember(allRestaurants, email) {
+        allRestaurants.flatMap { restaurant ->
+            restaurant.reviews
+                .filter { review ->
+                    review.author.equals(email, ignoreCase = true) ||
+                            review.author.equals(userHandle, ignoreCase = true)
+                }
+                .map { review -> restaurant.name to review }
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item {
+            Text("Account and settings", style = MaterialTheme.typography.headlineMedium)
+            Spacer(Modifier.height(12.dp))
+
+            // Profile Info Card
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = null,
+                        modifier = Modifier.padding(end = 16.dp)
+                    )
+                    Column {
+                        Text(userHandle, style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            email,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(8.dp))
+            Text("Your reviews (${userReviews.size})", style = MaterialTheme.typography.titleMedium)
+        }
+
+        if (userReviews.isEmpty()) {
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "You haven't written any reviews yet. Explore restaurants to share your first review!",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+            }
+        } else {
+            items(userReviews) { (restaurantName, review) ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            "$restaurantName · ★ ${review.rating}",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        if (review.visitDate.isNotBlank()) {
+                            Text(
+                                "Visited ${review.visitDate}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text(
+                            review.comment,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(16.dp))
+            OutlinedButton(
+                onClick = onSignOut,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Sign Out")
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "HKUEats · COMP3330 Group Project",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
     }
 }

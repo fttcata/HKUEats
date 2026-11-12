@@ -82,7 +82,7 @@ class SupabaseRestaurantRepository(
         return try {
             val restaurants = httpClient
                 .get("${SupabaseConfig.baseUrl}/rest/v1/restaurants") {
-                    accept(io.ktor.http.ContentType.Application.Json)
+                    accept(ContentType.Application.Json)
                     header(HttpHeaders.Authorization, "Bearer ${SupabaseConfig.apiKey}")
                     header("apikey", SupabaseConfig.apiKey)
                     parameter("select", "id,name,cuisine,location,price,rating")
@@ -91,7 +91,7 @@ class SupabaseRestaurantRepository(
 
             val reviews = httpClient
                 .get("${SupabaseConfig.baseUrl}/rest/v1/reviews") {
-                    accept(io.ktor.http.ContentType.Application.Json)
+                    accept(ContentType.Application.Json)
                     header(HttpHeaders.Authorization, "Bearer ${SupabaseConfig.apiKey}")
                     header("apikey", SupabaseConfig.apiKey)
                     parameter("select", "id,restaurant_id,author,rating,comment,visit_date,image_uri")
@@ -112,15 +112,32 @@ class SupabaseRestaurantRepository(
     override suspend fun getRestaurantByName(name: String): Restaurant? =
         getRestaurants().firstOrNull { it.name.equals(name, ignoreCase = true) }
 
+    override suspend fun getReviewsByAuthor(authorEmail: String): List<Pair<String, Review>> {
+        if (!SupabaseConfig.isConfigured) {
+            return fallbackRepository.getReviewsByAuthor(authorEmail)
+        }
+        return try {
+            val restaurants = getRestaurants()
+            restaurants.flatMap { restaurant ->
+                restaurant.reviews
+                    .filter { it.author.equals(authorEmail, ignoreCase = true) }
+                    .map { review -> restaurant.name to review }
+            }
+        } catch (_: Exception) {
+            fallbackRepository.getReviewsByAuthor(authorEmail)
+        }
+    }
+
     override suspend fun addReview(
         restaurantName: String,
+        authorEmail: String,
         rating: Double,
         comment: String,
         visitDate: String,
         imageUri: String?,
     ): Restaurant? {
         if (!SupabaseConfig.isConfigured) {
-            return fallbackRepository.addReview(restaurantName, rating, comment, visitDate, imageUri)
+            return fallbackRepository.addReview(restaurantName, authorEmail, rating, comment, visitDate, imageUri)
         }
 
         return try {
@@ -128,7 +145,7 @@ class SupabaseRestaurantRepository(
             val reviewInsert = ReviewRow(
                 id = UUID.randomUUID().toString(),
                 restaurantId = restaurant.id,
-                author = "You",
+                author = authorEmail.ifBlank { "student@connect.hku.hk" },
                 rating = rating,
                 comment = comment,
                 visitDate = visitDate,
@@ -144,7 +161,7 @@ class SupabaseRestaurantRepository(
 
             getRestaurantByName(restaurantName)
         } catch (_: Exception) {
-            fallbackRepository.addReview(restaurantName, rating, comment, visitDate, imageUri)
+            fallbackRepository.addReview(restaurantName, authorEmail, rating, comment, visitDate, imageUri)
         }
     }
 
