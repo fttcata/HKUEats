@@ -5,8 +5,6 @@ import java.util.UUID
 private const val DEFAULT_RESTAURANT_CUISINE = "Unspecified"
 private const val DEFAULT_RESTAURANT_PRICE = "$$"
 
-// App-level domain model.
-// The added `id` fields make this easier to map into Supabase tables later.
 data class Review(
     val id: String = UUID.randomUUID().toString(),
     val author: String,
@@ -29,8 +27,10 @@ data class Restaurant(
 interface RestaurantRepository {
     suspend fun getRestaurants(): List<Restaurant>
     suspend fun getRestaurantByName(name: String): Restaurant?
+    suspend fun getReviewsByAuthor(authorEmail: String): List<Pair<String, Review>>
     suspend fun addReview(
         restaurantName: String,
+        authorEmail: String,
         rating: Double,
         comment: String,
         visitDate: String,
@@ -55,8 +55,8 @@ class MockRestaurantRepository : RestaurantRepository {
             rating = 4.4,
             price = "$$",
             reviews = listOf(
-                Review(id = "review-jaspas-1", author = "Mina, Year 2", rating = 4.5, comment = "Relaxed atmosphere and generous portions."),
-                Review(id = "review-jaspas-2", author = "Anonymous HKU student", rating = 4.0, comment = "A good choice for a group after class."),
+                Review(id = "review-jaspas-1", author = "mina@connect.hku.hk", rating = 4.5, comment = "Relaxed atmosphere and generous portions."),
+                Review(id = "review-jaspas-2", author = "student@connect.hku.hk", rating = 4.0, comment = "A good choice for a group after class."),
             ),
         ),
         Restaurant(
@@ -67,8 +67,8 @@ class MockRestaurantRepository : RestaurantRepository {
             rating = 4.2,
             price = "$",
             reviews = listOf(
-                Review(id = "review-mido-1", author = "Jason, Year 1", rating = 4.0, comment = "Fast service and a very student-friendly price."),
-                Review(id = "review-mido-2", author = "Anonymous HKU student", rating = 4.5, comment = "The classic cafe food is reliable."),
+                Review(id = "review-mido-1", author = "jason@connect.hku.hk", rating = 4.0, comment = "Fast service and a very student-friendly price."),
+                Review(id = "review-mido-2", author = "student@connect.hku.hk", rating = 4.5, comment = "The classic cafe food is reliable."),
             ),
         ),
         Restaurant(
@@ -79,8 +79,8 @@ class MockRestaurantRepository : RestaurantRepository {
             rating = 4.6,
             price = "$$",
             reviews = listOf(
-                Review(id = "review-caffeine-1", author = "Sofia, Year 3", rating = 5.0, comment = "Great coffee and plenty of space to study."),
-                Review(id = "review-caffeine-2", author = "Anonymous HKU student", rating = 4.0, comment = "Quiet in the afternoon and easy to reach."),
+                Review(id = "review-caffeine-1", author = "sofia@connect.hku.hk", rating = 5.0, comment = "Great coffee and plenty of space to study."),
+                Review(id = "review-caffeine-2", author = "student@connect.hku.hk", rating = 4.0, comment = "Quiet in the afternoon and easy to reach."),
             ),
         ),
         Restaurant(
@@ -91,8 +91,8 @@ class MockRestaurantRepository : RestaurantRepository {
             rating = 4.1,
             price = "$",
             reviews = listOf(
-                Review(id = "review-wang-fu-1", author = "Chris, Year 4", rating = 4.0, comment = "Convenient between lectures and good value."),
-                Review(id = "review-wang-fu-2", author = "Anonymous HKU student", rating = 4.0, comment = "The closest option when I have a short break."),
+                Review(id = "review-wang-fu-1", author = "chris@connect.hku.hk", rating = 4.0, comment = "Convenient between lectures and good value."),
+                Review(id = "review-wang-fu-2", author = "student@connect.hku.hk", rating = 4.0, comment = "The closest option when I have a short break."),
             ),
         ),
     )
@@ -102,8 +102,17 @@ class MockRestaurantRepository : RestaurantRepository {
     override suspend fun getRestaurantByName(name: String): Restaurant? =
         restaurants.firstOrNull { it.name.equals(name, ignoreCase = true) }
 
+    override suspend fun getReviewsByAuthor(authorEmail: String): List<Pair<String, Review>> {
+        return restaurants.flatMap { restaurant ->
+            restaurant.reviews
+                .filter { it.author.equals(authorEmail, ignoreCase = true) }
+                .map { review -> restaurant.name to review }
+        }
+    }
+
     override suspend fun addReview(
         restaurantName: String,
+        authorEmail: String,
         rating: Double,
         comment: String,
         visitDate: String,
@@ -114,7 +123,7 @@ class MockRestaurantRepository : RestaurantRepository {
 
         val restaurant = restaurants[index]
         val updatedReviews = restaurant.reviews + Review(
-            author = "You",
+            author = authorEmail.ifBlank { "student@connect.hku.hk" },
             rating = rating,
             comment = comment,
             visitDate = visitDate,
