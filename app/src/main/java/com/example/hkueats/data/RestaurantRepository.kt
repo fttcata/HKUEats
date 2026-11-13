@@ -171,5 +171,5 @@ object AppContainer {
         MockRestaurantRepository()
     }
 
-    val userRepository: UserRepository = SupabaseUserRepository()
+    val userRepository: UserRepository = HkuEmailUserRepository()
 }

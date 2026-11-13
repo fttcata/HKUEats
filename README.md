@@ -16,11 +16,12 @@ Compose prototype with:
 - Restaurant details with ratings and seeded student reviews
 - An add-restaurant form (local UI only)
 - A profile/settings screen
-- A simple login screen for the planned HKU Microsoft sign-in flow
+- A demo login screen that checks the email domain; Microsoft authentication
+  and Supabase profile syncing are not connected
 
-The current data is intentionally local mock data. Supabase, Ktor, Microsoft
-OAuth, GPS, image uploads, likes, and comments are planned integration work
-and are not yet connected.
+The current data is primarily local mock data. Supabase restaurant/review
+integration is optional; Microsoft OAuth, GPS, image uploads, likes, and
+comments are not connected.
 
 ## Technology
 
@@ -70,7 +71,8 @@ location, review action, and recent student reviews.
 Use an HKU student tester on an emulator or device and record whether each task
 is completed without explanation:
 
-1. Sign in with any values in the prototype login form.
+1. Continue with an email ending in `@connect.hku.hk` or `@hku.hk` (the
+   prototype checks the domain only; it does not authenticate the account).
 2. Search for `cafe` and confirm The Caffeine Laboratory appears.
 3. Clear the query, select `HKU Main Campus`, and confirm Wang Fu appears.
 4. Open a restaurant card and confirm its rating, location, and two reviews.

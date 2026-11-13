@@ -52,11 +52,11 @@ import androidx.compose.ui.unit.dp
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
-import java.util.UUID
 import kotlinx.coroutines.launch
 import com.example.hkueats.data.AppContainer
 import com.example.hkueats.data.Restaurant
 import com.example.hkueats.data.Review
+import com.example.hkueats.data.UserLoginResult
 import com.example.hkueats.ui.theme.HKUEatsTheme
 
 private val restaurantRepository = AppContainer.restaurantRepository
@@ -186,7 +186,6 @@ private fun AppScaffold(
 private fun LoginScreen(onLoginSuccess: (String) -> Unit) {
     var emailInput by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    val coroutineScope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -208,27 +207,17 @@ private fun LoginScreen(onLoginSuccess: (String) -> Unit) {
 
         Button(
             onClick = {
-                coroutineScope.launch {
-                    val trimmedEmail = emailInput.trim()
-                    val mockUserId = UUID.randomUUID().toString()
-                    val displayName = trimmedEmail.substringBefore("@")
-
-                    val isValidUser = userRepository.handleUserLogin(
-                        userId = mockUserId,
-                        email = trimmedEmail,
-                        displayName = displayName
-                    )
-
-                    if (isValidUser) {
-                        onLoginSuccess(trimmedEmail)
-                    } else {
+                val trimmedEmail = emailInput.trim()
+                when (userRepository.validateHkuEmail(trimmedEmail)) {
+                    UserLoginResult.Success -> onLoginSuccess(trimmedEmail)
+                    UserLoginResult.InvalidEmail -> {
                         errorMessage = "Access restricted to HKU accounts (@connect.hku.hk or @hku.hk)."
                     }
                 }
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Sign in with HKU")
+            Text("Continue with email")
         }
 
         errorMessage?.let {
@@ -241,7 +230,7 @@ private fun LoginScreen(onLoginSuccess: (String) -> Unit) {
         }
 
         Text(
-            "Microsoft OAuth integration boundary active.",
+            "Demo access only. Microsoft sign-in is not connected yet.",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 16.dp),
         )
