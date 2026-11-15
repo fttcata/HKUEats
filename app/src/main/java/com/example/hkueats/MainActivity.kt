@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -131,7 +133,15 @@ private fun HKUEatsApp() {
         Screen.AddRestaurant -> AppScaffold(
             screen = screen,
             onNavigate = { screen = it },
-            content = { AddRestaurantScreen() },
+            content = {
+                AddRestaurantScreen(
+                    existingRestaurants = restaurants,
+                    onAdded = { restaurant ->
+                        restaurants = restaurants + restaurant
+                        screen = Screen.Home
+                    },
+                )
+            },
         )
         Screen.Account -> AppScaffold(
             screen = screen,
@@ -388,14 +398,24 @@ private fun ReviewScreen(
     var visitDate by remember { mutableStateOf("") }
     var imageUri by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var isSubmitting by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri ->
-        imageUri = uri?.toString()
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            imageUri = uri.toString()
+            errorMessage = null
+        }
     }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         TopAppBar(
             title = { Text("Write a review") },
             navigationIcon = {
@@ -421,7 +441,7 @@ private fun ReviewScreen(
         }
         OutlinedTextField(
             value = comment,
-            onValueChange = { comment = it },
+            onValueChange = { comment = it; errorMessage = null },
             label = { Text("Comment") },
             minLines = 4,
             modifier = Modifier.fillMaxWidth(),
@@ -452,6 +472,12 @@ private fun ReviewScreen(
         ) {
             Text(if (imageUri == null) "Add an optional photo" else "Photo selected")
         }
+        if (imageUri != null) {
+            OutlinedButton(
+                onClick = { imageUri = null },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Remove photo") }
+        }
         errorMessage?.let {
             Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 12.dp))
         }
@@ -462,54 +488,103 @@ private fun ReviewScreen(
                     rating == 0 -> errorMessage = "Please select a rating."
                     comment.isBlank() -> errorMessage = "Please enter a comment."
                     visitDate.isBlank() -> errorMessage = "Please select your visit date."
+                    isSubmitting -> Unit
                     else -> coroutineScope.launch {
-                        restaurantRepository.addReview(
-                            restaurantName = restaurantName,
-                            authorEmail = currentUserEmail, // <--- Ties review to real logged-in user
-                            rating = rating.toDouble(),
-                            comment = comment.trim(),
-                            visitDate = visitDate,
-                            imageUri = imageUri,
-                        )?.let(onSubmitted)
+                        isSubmitting = true
+                        errorMessage = try {
+                            val updatedRestaurant = restaurantRepository.addReview(
+                                restaurantName = restaurantName,
+                                authorEmail = currentUserEmail,
+                                rating = rating.toDouble(),
+                                comment = comment.trim(),
+                                visitDate = visitDate,
+                                imageUri = imageUri,
+                            )
+                            if (updatedRestaurant == null) "Could not save your review. Please try again."
+                            else {
+                                onSubmitted(updatedRestaurant)
+                                null
+                            }
+                        } catch (_: Exception) {
+                            "Could not save your review. Please try again."
+                        }
+                        isSubmitting = false
                     }
                 }
             },
-            enabled = rating > 0 && comment.isNotBlank() && visitDate.isNotBlank(),
+            enabled = !isSubmitting,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Submit review")
+            Text(if (isSubmitting) "Submitting…" else "Submit review")
         }
     }
 }
 
 @Composable
-private fun AddRestaurantScreen() {
+private fun AddRestaurantScreen(
+    existingRestaurants: List<Restaurant>,
+    onAdded: (Restaurant) -> Unit,
+) {
     val coroutineScope = rememberCoroutineScope()
     var name by remember { mutableStateOf("") }
     var location by remember { mutableStateOf("") }
+    var cuisine by remember { mutableStateOf("") }
+    var price by remember { mutableStateOf("$$") }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var isSubmitting by remember { mutableStateOf(false) }
     var submitted by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Text("Add a food spot", style = MaterialTheme.typography.headlineMedium)
         Text("Help other HKU students discover it.")
         Spacer(Modifier.height(16.dp))
-        OutlinedTextField(name, { name = it }, label = { Text("Restaurant name") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(name, { name = it; errorMessage = null; submitted = false }, label = { Text("Restaurant name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(12.dp))
-        OutlinedTextField(location, { location = it }, label = { Text("Location") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(location, { location = it; errorMessage = null; submitted = false }, label = { Text("Location") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(12.dp))
-        OutlinedButton(onClick = {}, modifier = Modifier.fillMaxWidth()) { Text("Use current location") }
+        OutlinedTextField(cuisine, { cuisine = it; submitted = false }, label = { Text("Cuisine (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(12.dp))
+        Text("Price range", style = MaterialTheme.typography.labelLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
+            listOf("$", "$$", "$$$").forEach { option ->
+                FilterChip(selected = price == option, onClick = { price = option }, label = { Text(option) })
+            }
+        }
+        errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp)) }
         Button(
             onClick = {
-                coroutineScope.launch {
-                    submitted = restaurantRepository.addRestaurant(
-                        name = name.trim(),
-                        location = location.trim(),
-                    ) != null
+                val cleanName = name.trim()
+                val cleanLocation = location.trim()
+                when {
+                    cleanName.isBlank() -> errorMessage = "Enter a restaurant name."
+                    cleanLocation.isBlank() -> errorMessage = "Enter the restaurant location."
+                    existingRestaurants.any { it.name.equals(cleanName, ignoreCase = true) } ->
+                        errorMessage = "This restaurant is already listed."
+                    isSubmitting -> Unit
+                    else -> coroutineScope.launch {
+                        isSubmitting = true
+                        errorMessage = try {
+                            val restaurant = restaurantRepository.addRestaurant(
+                                name = cleanName,
+                                location = cleanLocation,
+                                cuisine = cuisine.trim().ifBlank { "Unspecified" },
+                                price = price,
+                            )
+                            if (restaurant == null) "Could not add this restaurant. Check that it isn't already listed."
+                            else {
+                                submitted = true
+                                onAdded(restaurant)
+                                null
+                            }
+                        } catch (_: Exception) {
+                            "Could not add this restaurant. Please try again."
+                        }
+                        isSubmitting = false
+                    }
                 }
             },
-            enabled = name.isNotBlank() && location.isNotBlank(),
+            enabled = !isSubmitting,
             modifier = Modifier.fillMaxWidth(),
-        ) { Text("Submit for review") }
+        ) { Text(if (isSubmitting) "Adding…" else "Add restaurant") }
         if (submitted) Text("Thanks! Your suggestion is ready for verification.", Modifier.padding(top = 12.dp))
     }
 }
