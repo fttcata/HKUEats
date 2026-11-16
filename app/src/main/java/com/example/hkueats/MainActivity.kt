@@ -28,11 +28,14 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
@@ -51,18 +54,28 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 import kotlinx.coroutines.launch
 import com.example.hkueats.data.AppContainer
+import com.example.hkueats.data.CampusPlace
+import com.example.hkueats.data.Coordinates
 import com.example.hkueats.data.Restaurant
 import com.example.hkueats.data.Review
 import com.example.hkueats.data.UserLoginResult
+import com.example.hkueats.data.loadCampusPlaces
+import com.example.hkueats.data.suggestionsFor
 import com.example.hkueats.ui.theme.HKUEatsTheme
+import kotlin.math.roundToInt
+import kotlinx.coroutines.CancellationException
 
 private val restaurantRepository = AppContainer.restaurantRepository
 private val userRepository = AppContainer.userRepository
+private const val NEARBY_RADIUS_METERS = 500
 
 private enum class Screen { Login, Home, Details, AddReview, AddRestaurant, Account }
 
@@ -255,8 +268,25 @@ private fun HomeScreen(
     var query by remember { mutableStateOf("") }
     var selectedCuisine by remember { mutableStateOf("All") }
     var selectedLocation by remember { mutableStateOf("All") }
-    val cuisines = listOf("All", "Western", "Chinese", "Cafe", "Hong Kong")
-    val locations = listOf("All", "HKU Main Campus", "Pok Fu Lam", "Sai Ying Pun", "Kennedy Town")
+    var nearbyOrigin by remember { mutableStateOf<Coordinates?>(null) }
+    var allRestaurantsOrigin by remember { mutableStateOf<DistanceOrigin?>(null) }
+    val context = LocalContext.current
+    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    val locationRequest = rememberCurrentLocationRequest { coordinates ->
+        nearbyOrigin = coordinates
+        allRestaurantsOrigin = DistanceOrigin(coordinates)
+    }
+    LaunchedEffect(lifecycleState, selectedLocation, nearbyOrigin) {
+        if (lifecycleState != Lifecycle.State.RESUMED) return@LaunchedEffect
+        if (!context.hasPreciseLocationPermission()) nearbyOrigin = null
+        if (!context.hasLocationPermission()) {
+            allRestaurantsOrigin = null
+        } else if (selectedLocation == "All" && nearbyOrigin == null) {
+            allRestaurantsOrigin = getLocationForDistances(context)
+        }
+    }
+    val cuisines = listOf("All") + allRestaurants.map { it.cuisine }.distinct().sorted().filterNot { it == "All" }
+    val locations = listOf("All") + allRestaurants.map { it.location }.distinct().sorted().filterNot { it == "All" }
     val restaurants = allRestaurants.filter {
         (selectedCuisine == "All" || it.cuisine == selectedCuisine) &&
                 (selectedLocation == "All" || it.location == selectedLocation) &&
@@ -264,6 +294,18 @@ private fun HomeScreen(
                         it.name.contains(query, ignoreCase = true) ||
                         it.cuisine.contains(query, ignoreCase = true) ||
                         it.location.contains(query, ignoreCase = true))
+    }
+    val distanceOrigin = nearbyOrigin?.let { DistanceOrigin(it) }
+        ?: allRestaurantsOrigin.takeIf { selectedLocation == "All" }
+    val restaurantsWithDistances = restaurants.map { restaurant ->
+        restaurant to distanceOrigin?.let { origin -> restaurant.coordinates?.distanceTo(origin.coordinates) }
+    }
+    val displayedRestaurants = if (nearbyOrigin != null) {
+        restaurantsWithDistances.filter { (_, distance) ->
+            distance != null && distance <= NEARBY_RADIUS_METERS
+        }.sortedBy { it.second }
+    } else {
+        restaurantsWithDistances
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Text("Good afternoon!", style = MaterialTheme.typography.headlineMedium)
@@ -295,6 +337,18 @@ private fun HomeScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(vertical = 8.dp),
         ) {
+            item {
+                FilterChip(
+                    selected = nearbyOrigin != null,
+                    onClick = {
+                        if (nearbyOrigin == null) locationRequest.launch() else nearbyOrigin = null
+                    },
+                    enabled = !locationRequest.isLoading,
+                    label = {
+                        Text(if (locationRequest.isLoading) "Finding location…" else "Near me · ${NEARBY_RADIUS_METERS} m")
+                    },
+                )
+            }
             items(locations) { location ->
                 FilterChip(
                     selected = selectedLocation == location,
@@ -303,25 +357,39 @@ private fun HomeScreen(
                 )
             }
         }
+        locationRequest.error?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 8.dp))
+        }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (restaurants.isEmpty()) {
+            if (displayedRestaurants.isEmpty()) {
                 item {
                     Text(
-                        "No restaurants match these filters.",
+                        if (nearbyOrigin == null) "No restaurants match these filters."
+                        else "No matching restaurants within ${NEARBY_RADIUS_METERS} m.",
                         style = MaterialTheme.typography.bodyLarge,
                         modifier = Modifier.padding(vertical = 24.dp),
                     )
                 }
             }
-            items(restaurants, key = { it.name }) { restaurant ->
-                RestaurantCard(restaurant, onClick = { onRestaurantClick(restaurant) })
+            items(displayedRestaurants, key = { it.first.id }) { (restaurant, distanceMeters) ->
+                RestaurantCard(
+                    restaurant,
+                    distanceMeters,
+                    distanceOrigin?.approximate == true,
+                    onClick = { onRestaurantClick(restaurant) },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun RestaurantCard(restaurant: Restaurant, onClick: () -> Unit) {
+private fun RestaurantCard(
+    restaurant: Restaurant,
+    distanceMeters: Float?,
+    approximateDistance: Boolean,
+    onClick: () -> Unit,
+) {
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
             Text(restaurant.name, style = MaterialTheme.typography.titleLarge)
@@ -329,6 +397,17 @@ private fun RestaurantCard(restaurant: Restaurant, onClick: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("★ ${restaurant.rating}", style = MaterialTheme.typography.bodyLarge)
                 Text("  ·  ${restaurant.location}", style = MaterialTheme.typography.bodyMedium)
+            }
+            if (distanceMeters != null) {
+                val distanceLabel = if (distanceMeters < 1_000) {
+                    "${distanceMeters.roundToInt()} m away"
+                } else {
+                    String.format(Locale.getDefault(), "%.1f km away", distanceMeters / 1_000)
+                }
+                Text(
+                    if (approximateDistance) "About ${distanceLabel}" else distanceLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
     }
@@ -520,28 +599,106 @@ private fun ReviewScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddRestaurantScreen(
     existingRestaurants: List<Restaurant>,
     onAdded: (Restaurant) -> Unit,
 ) {
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val campusPlaces = remember(context) { loadCampusPlaces(context) }
     var name by remember { mutableStateOf("") }
     var location by remember { mutableStateOf("") }
+    var selectedPlace by remember { mutableStateOf<CampusPlace?>(null) }
+    var currentCoordinates by remember { mutableStateOf<Coordinates?>(null) }
+    var showSuggestions by remember { mutableStateOf(false) }
     var cuisine by remember { mutableStateOf("") }
     var price by remember { mutableStateOf("$$") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isSubmitting by remember { mutableStateOf(false) }
-    var submitted by remember { mutableStateOf(false) }
+    val locationRequest = rememberCurrentLocationRequest { coordinates ->
+        if (selectedPlace == null) {
+            currentCoordinates = coordinates
+            errorMessage = null
+        }
+    }
+    val suggestions = remember(campusPlaces, location, selectedPlace) {
+        if (selectedPlace == null) campusPlaces.suggestionsFor(location) else emptyList()
+    }
+    val suggestionsExpanded = showSuggestions && suggestions.isNotEmpty() && !isSubmitting
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Text("Add a food spot", style = MaterialTheme.typography.headlineMedium)
-        Text("Help other HKU students discover it.")
         Spacer(Modifier.height(16.dp))
-        OutlinedTextField(name, { name = it; errorMessage = null; submitted = false }, label = { Text("Restaurant name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(name, { name = it; errorMessage = null }, label = { Text("Restaurant name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(12.dp))
-        OutlinedTextField(location, { location = it; errorMessage = null; submitted = false }, label = { Text("Location") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        ExposedDropdownMenuBox(
+            expanded = suggestionsExpanded,
+            onExpandedChange = { showSuggestions = it },
+        ) {
+            OutlinedTextField(
+                value = location,
+                onValueChange = {
+                    location = it
+                    selectedPlace = null
+                    showSuggestions = true
+                    errorMessage = null
+                },
+                label = { Text("Building name or address") },
+                singleLine = true,
+                enabled = !isSubmitting,
+                modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable, enabled = !isSubmitting),
+            )
+            ExposedDropdownMenu(
+                expanded = suggestionsExpanded,
+                onDismissRequest = { showSuggestions = false },
+            ) {
+                suggestions.forEach { place ->
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(place.name)
+                                Text(place.campus, style = MaterialTheme.typography.bodySmall)
+                            }
+                        },
+                        onClick = {
+                            location = place.name
+                            selectedPlace = place
+                            currentCoordinates = null
+                            showSuggestions = false
+                            errorMessage = null
+                        },
+                    )
+                }
+            }
+        }
+        if (selectedPlace == null) {
+            val hasCurrentLocation = currentCoordinates != null
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = {
+                    if (hasCurrentLocation) currentCoordinates = null
+                    else locationRequest.launch()
+                },
+                enabled = !isSubmitting && !locationRequest.isLoading,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    when {
+                        hasCurrentLocation -> "Remove current location"
+                        locationRequest.isLoading -> "Finding location…"
+                        else -> "Use my current location"
+                    },
+                )
+            }
+            if (!hasCurrentLocation) {
+                locationRequest.error?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp))
+                }
+            }
+        }
         Spacer(Modifier.height(12.dp))
-        OutlinedTextField(cuisine, { cuisine = it; submitted = false }, label = { Text("Cuisine (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(cuisine, { cuisine = it }, label = { Text("Cuisine (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(12.dp))
         Text("Price range", style = MaterialTheme.typography.labelLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
@@ -554,9 +711,11 @@ private fun AddRestaurantScreen(
             onClick = {
                 val cleanName = name.trim()
                 val cleanLocation = location.trim()
+                val coordinates = selectedPlace?.coordinates ?: currentCoordinates
                 when {
                     cleanName.isBlank() -> errorMessage = "Enter a restaurant name."
-                    cleanLocation.isBlank() -> errorMessage = "Enter the restaurant location."
+                    cleanLocation.isBlank() -> errorMessage = "Enter a building name."
+                    coordinates == null -> errorMessage = "Add a location pin before saving."
                     existingRestaurants.any { it.name.equals(cleanName, ignoreCase = true) } ->
                         errorMessage = "This restaurant is already listed."
                     isSubmitting -> Unit
@@ -566,26 +725,28 @@ private fun AddRestaurantScreen(
                             val restaurant = restaurantRepository.addRestaurant(
                                 name = cleanName,
                                 location = cleanLocation,
+                                coordinates = coordinates,
                                 cuisine = cuisine.trim().ifBlank { "Unspecified" },
                                 price = price,
                             )
-                            if (restaurant == null) "Could not add this restaurant. Check that it isn't already listed."
+                            if (restaurant == null) "Could not add this restaurant. Please try again."
                             else {
-                                submitted = true
                                 onAdded(restaurant)
                                 null
                             }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
                         } catch (_: Exception) {
                             "Could not add this restaurant. Please try again."
+                        } finally {
+                            isSubmitting = false
                         }
-                        isSubmitting = false
                     }
                 }
             },
-            enabled = !isSubmitting,
+            enabled = !isSubmitting && !locationRequest.isLoading,
             modifier = Modifier.fillMaxWidth(),
         ) { Text(if (isSubmitting) "Adding…" else "Add restaurant") }
-        if (submitted) Text("Thanks! Your suggestion is ready for verification.", Modifier.padding(top = 12.dp))
     }
 }
 
