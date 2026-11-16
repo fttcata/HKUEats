@@ -14,6 +14,17 @@ data class Review(
     val imageUri: String? = null,
 )
 
+@ConsistentCopyVisibility
+data class Coordinates private constructor(val latitude: Double, val longitude: Double) {
+    companion object {
+        fun from(latitude: Double?, longitude: Double?): Coordinates? {
+            if (latitude == null || longitude == null) return null
+            if (latitude !in -90.0..90.0 || longitude !in -180.0..180.0) return null
+            return Coordinates(latitude, longitude)
+        }
+    }
+}
+
 data class Restaurant(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
@@ -22,6 +33,7 @@ data class Restaurant(
     val rating: Double,
     val price: String,
     val reviews: List<Review>,
+    val coordinates: Coordinates? = null,
 )
 
 interface RestaurantRepository {
@@ -40,6 +52,7 @@ interface RestaurantRepository {
     suspend fun addRestaurant(
         name: String,
         location: String,
+        coordinates: Coordinates,
         cuisine: String = DEFAULT_RESTAURANT_CUISINE,
         price: String = DEFAULT_RESTAURANT_PRICE,
     ): Restaurant?
@@ -48,22 +61,24 @@ interface RestaurantRepository {
 class MockRestaurantRepository : RestaurantRepository {
     private val restaurants = mutableListOf(
         Restaurant(
-            id = "restaurant-jaspas",
-            name = "Jaspas Beach Club",
-            cuisine = "Western",
-            location = "Pok Fu Lam",
+            id = "restaurant-cym",
+            name = "CYM Canteen",
+            cuisine = "Hong Kong",
+            location = "HKU Main Campus",
+            coordinates = Coordinates.from(22.28271, 114.13914),
             rating = 4.4,
             price = "$$",
             reviews = listOf(
-                Review(id = "review-jaspas-1", author = "mina@connect.hku.hk", rating = 4.5, comment = "Relaxed atmosphere and generous portions."),
-                Review(id = "review-jaspas-2", author = "student@connect.hku.hk", rating = 4.0, comment = "A good choice for a group after class."),
+                Review(id = "review-cym-1", author = "mina@connect.hku.hk", rating = 4.5, comment = "Generous portions for a campus lunch."),
+                Review(id = "review-cym-2", author = "student@connect.hku.hk", rating = 4.0, comment = "A good choice for a group after class."),
             ),
         ),
         Restaurant(
             id = "restaurant-mido",
             name = "Mido Cafe",
             cuisine = "Hong Kong",
-            location = "Sai Ying Pun",
+            location = "Yau Ma Tei",
+            coordinates = Coordinates.from(22.31023, 114.17037),
             rating = 4.2,
             price = "$",
             reviews = listOf(
@@ -72,27 +87,29 @@ class MockRestaurantRepository : RestaurantRepository {
             ),
         ),
         Restaurant(
-            id = "restaurant-caffeine",
-            name = "The Caffeine Laboratory",
+            id = "restaurant-starbucks-composite",
+            name = "Starbucks Coffee (Composite Building)",
             cuisine = "Cafe",
-            location = "Kennedy Town",
+            location = "HKU Main Campus",
+            coordinates = Coordinates.from(22.28317, 114.13590),
             rating = 4.6,
             price = "$$",
             reviews = listOf(
-                Review(id = "review-caffeine-1", author = "sofia@connect.hku.hk", rating = 5.0, comment = "Great coffee and plenty of space to study."),
-                Review(id = "review-caffeine-2", author = "student@connect.hku.hk", rating = 4.0, comment = "Quiet in the afternoon and easy to reach."),
+                Review(id = "review-starbucks-1", author = "sofia@connect.hku.hk", rating = 5.0, comment = "Great coffee and plenty of space to study."),
+                Review(id = "review-starbucks-2", author = "student@connect.hku.hk", rating = 4.0, comment = "Quiet in the afternoon and easy to reach."),
             ),
         ),
         Restaurant(
-            id = "restaurant-wang-fu",
-            name = "Wang Fu",
-            cuisine = "Chinese",
-            location = "HKU Main Campus",
+            id = "restaurant-bijas",
+            name = "BIJAS Vegetarian",
+            cuisine = "Vegetarian",
+            location = "HKU Centennial Campus",
+            coordinates = Coordinates.from(22.28372, 114.13443),
             rating = 4.1,
             price = "$",
             reviews = listOf(
-                Review(id = "review-wang-fu-1", author = "chris@connect.hku.hk", rating = 4.0, comment = "Convenient between lectures and good value."),
-                Review(id = "review-wang-fu-2", author = "student@connect.hku.hk", rating = 4.0, comment = "The closest option when I have a short break."),
+                Review(id = "review-bijas-1", author = "chris@connect.hku.hk", rating = 4.0, comment = "Convenient between lectures and good value."),
+                Review(id = "review-bijas-2", author = "student@connect.hku.hk", rating = 4.0, comment = "The closest option when I have a short break."),
             ),
         ),
     )
@@ -141,6 +158,7 @@ class MockRestaurantRepository : RestaurantRepository {
     override suspend fun addRestaurant(
         name: String,
         location: String,
+        coordinates: Coordinates,
         cuisine: String,
         price: String,
     ): Restaurant? {
@@ -155,6 +173,7 @@ class MockRestaurantRepository : RestaurantRepository {
             name = trimmedName,
             cuisine = cuisine.ifBlank { DEFAULT_RESTAURANT_CUISINE },
             location = trimmedLocation,
+            coordinates = coordinates,
             rating = 0.0,
             price = price.ifBlank { DEFAULT_RESTAURANT_PRICE },
             reviews = emptyList(),

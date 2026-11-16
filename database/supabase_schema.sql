@@ -8,9 +8,16 @@ create table if not exists public.restaurants (
     name text not null unique,
     cuisine text not null default 'Unspecified',
     location text not null,
+    latitude double precision,
+    longitude double precision,
     price text not null default '$$',
     rating double precision not null default 0,
-    created_at timestamptz not null default now()
+    created_at timestamptz not null default now(),
+    constraint restaurants_valid_coordinates check (
+        (latitude is null and longitude is null)
+        or (latitude is not null and longitude is not null
+            and latitude between -90 and 90 and longitude between -180 and 180)
+    )
 );
 
 create table if not exists public.reviews (

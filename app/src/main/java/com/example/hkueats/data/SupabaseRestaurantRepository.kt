@@ -13,8 +13,10 @@ import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -27,6 +29,8 @@ private data class RestaurantRow(
     val location: String = "",
     val price: String = "$$",
     val rating: Double = 0.0,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
 )
 
 @Serializable
@@ -48,6 +52,7 @@ private fun RestaurantRow.toDomain(reviews: List<Review>): Restaurant = Restaura
     rating = rating,
     price = price,
     reviews = reviews,
+    coordinates = Coordinates.from(latitude, longitude),
 )
 
 private fun ReviewRow.toDomain(): Review = Review(
@@ -85,7 +90,6 @@ class SupabaseRestaurantRepository(
                     accept(ContentType.Application.Json)
                     header(HttpHeaders.Authorization, "Bearer ${SupabaseConfig.apiKey}")
                     header("apikey", SupabaseConfig.apiKey)
-                    parameter("select", "id,name,cuisine,location,price,rating")
                 }
                 .body<List<RestaurantRow>>()
 
@@ -168,33 +172,41 @@ class SupabaseRestaurantRepository(
     override suspend fun addRestaurant(
         name: String,
         location: String,
+        coordinates: Coordinates,
         cuisine: String,
         price: String,
     ): Restaurant? {
         if (!SupabaseConfig.isConfigured) {
-            return fallbackRepository.addRestaurant(name, location, cuisine, price)
+            return fallbackRepository.addRestaurant(name, location, coordinates, cuisine, price)
         }
+
+        val cleanName = name.trim()
+        val cleanLocation = location.trim()
+        if (cleanName.isBlank() || cleanLocation.isBlank()) return null
 
         return try {
             val restaurantInsert = RestaurantRow(
                 id = UUID.randomUUID().toString(),
-                name = name.trim(),
+                name = cleanName,
                 cuisine = cuisine.ifBlank { "Unspecified" },
-                location = location.trim(),
+                location = cleanLocation,
                 price = price.ifBlank { "$$" },
-                rating = 0.0,
+                latitude = coordinates.latitude,
+                longitude = coordinates.longitude,
             )
 
-            httpClient.post("${SupabaseConfig.baseUrl}/rest/v1/restaurants") {
+            val response = httpClient.post("${SupabaseConfig.baseUrl}/rest/v1/restaurants") {
                 contentType(ContentType.Application.Json)
                 header(HttpHeaders.Authorization, "Bearer ${SupabaseConfig.apiKey}")
                 header("apikey", SupabaseConfig.apiKey)
                 setBody(restaurantInsert)
             }
 
-            getRestaurantByName(name)
+            if (response.status.isSuccess()) restaurantInsert.toDomain(emptyList()) else null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
-            fallbackRepository.addRestaurant(name, location, cuisine, price)
+            null
         }
     }
 }

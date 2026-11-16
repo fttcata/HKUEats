@@ -12,15 +12,16 @@ Compose prototype with:
 
 - A home screen with seeded nearby restaurant recommendations
 - Search across restaurant name, cuisine, and location
-- Independent cuisine and location filters
+- Cuisine, location, and **Near me · 500 m** filters
 - Restaurant details with ratings and seeded student reviews
-- An add-restaurant form (local UI only)
+- An add-restaurant form with offline HKU building suggestions and
+  **Use my current location** for other buildings
 - A profile/settings screen
 - A demo login screen that checks the email domain; Microsoft authentication
   and Supabase profile syncing are not connected
 
 The current data is primarily local mock data. Supabase restaurant/review
-integration is optional; Microsoft OAuth, GPS, image uploads, likes, and
+integration is optional. Microsoft OAuth, image uploads, likes, and
 comments are not connected.
 
 ## Technology
@@ -53,6 +54,19 @@ HKUEats/
 The project targets Android API 35 and requires a JDK version supported by the
 installed Android Gradle Plugin (JDK 17 is recommended).
 
+### Supabase location setup
+
+For a new project, run [supabase_schema.sql](database/supabase_schema.sql). For an
+existing project, apply [add_restaurant_coordinates.sql](database/add_restaurant_coordinates.sql)
+before submitting new places. Existing places without coordinates still appear
+in regular search. To load matching demo locations into Supabase, run
+[seed_demo_restaurants.sql](database/seed_demo_restaurants.sql). Demo locations
+use the [HKU catering directory](https://catering.hku.hk/en/eateries/) and
+OpenStreetMap points for [Chong Yuet Ming Amenities Centre](https://www.openstreetmap.org/way/182203652),
+[Composite Building](https://www.openstreetmap.org/way/182172765),
+[Run Run Shaw Tower](https://www.openstreetmap.org/way/315571046), and
+[Mido Cafe](https://www.openstreetmap.org/node/4181250694).
+
 ## Wireframe and navigation
 
 The low-fidelity navigation is deliberately shallow for the MVP:
@@ -73,10 +87,31 @@ is completed without explanation:
 
 1. Continue with an email ending in `@connect.hku.hk` or `@hku.hk` (the
    prototype checks the domain only; it does not authenticate the account).
-2. Search for `cafe` and confirm The Caffeine Laboratory appears.
-3. Clear the query, select `HKU Main Campus`, and confirm Wang Fu appears.
+2. Search for `cafe` and confirm Starbucks Coffee appears.
+3. Clear the query, select `HKU Main Campus`, and confirm CYM Canteen appears.
 4. Open a restaurant card and confirm its rating, location, and two reviews.
 5. Press back and confirm the Explore list is visible again.
+
+### Manual location validation
+
+1. Set emulator location to latitude `22.28317`, longitude `114.13590`.
+   Tap **Near me · 500 m**, then grant precise location. Confirm that Starbucks
+   appears first and Mido Cafe is excluded.
+2. Turn off the filter and confirm normal search still includes Mido Cafe.
+   With **All** selected under Location, confirm that the cards still show
+   distances. Repeat with location permission denied and check that regular
+   browsing works with the distance labels hidden.
+3. In **Add place**, type `comp` and select **Composite Building**. Enter a
+   new restaurant name and submit without granting location permission on the
+   form. Return to **Near me · 500 m** and confirm the new place appears.
+4. Repeat with a custom building name and **Use my current location**. Confirm
+   the button switches to **Remove current location** before saving. With Supabase
+   configured, restart the app and confirm the place is still listed.
+
+The [bundled location list](app/src/main/assets/hku-campus-places.json) is a
+snapshot of the 108 entries in the [HKU Campus Map Buildings directory](https://www.maps.hku.hk/?desktop=1),
+including Centennial Campus locations listed under Main Campus. Coordinates
+are the university's map pins. Common abbreviations also match suggestions.
 
 The current repository does not include participant data or automated UI test
 fixtures, so this checklist is the handoff for the requested student
