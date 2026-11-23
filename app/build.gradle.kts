@@ -15,6 +15,7 @@ if (localPropertiesFile.exists()) {
 
 val supabaseUrl = localProperties.getProperty("SUPABASE_URL") ?: ""
 val supabaseAnonKey = localProperties.getProperty("SUPABASE_ANON_KEY") ?: ""
+val googleMapsApiKey = localProperties.getProperty("GOOGLE_MAPS_API_KEY") ?: ""
 
 android {
     namespace = "com.example.hkueats"
@@ -34,6 +35,7 @@ android {
 
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
+        buildConfigField("String", "GOOGLE_MAPS_API_KEY", "\"$googleMapsApiKey\"")
     }
 
     buildFeatures {

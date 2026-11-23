@@ -53,6 +53,13 @@ private fun RestaurantRow.toDomain(reviews: List<Review>): Restaurant = Restaura
     price = price,
     reviews = reviews,
     coordinates = Coordinates.from(latitude, longitude),
+    imageResId = when {
+        name.equals("CYM Canteen", ignoreCase = true) ->
+            com.example.hkueats.R.drawable.cym_canteen
+        name.equals("Starbucks Coffee (Composite Building)", ignoreCase = true) ->
+            com.example.hkueats.R.drawable.starbucks_composite
+        else -> null
+    },
 )
 
 private fun ReviewRow.toDomain(): Review = Review(

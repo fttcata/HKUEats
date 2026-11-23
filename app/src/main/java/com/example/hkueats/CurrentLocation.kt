@@ -25,6 +25,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 private const val LOCATION_TIMEOUT_MS = 15_000L
 private const val MAX_LOCATION_ACCURACY_METERS = 100f
+private const val EMULATOR_DEFAULT_LATITUDE = 37.421998
+private const val EMULATOR_DEFAULT_LONGITUDE = -122.084
+private const val EMULATOR_DEFAULT_RADIUS_METERS = 1_000f
 
 internal data class CurrentLocationRequest(
     val isLoading: Boolean,
@@ -54,6 +57,8 @@ internal fun rememberCurrentLocationRequest(
                 when {
                     location == null || coordinates == null ->
                         error = "Couldn’t get your location. Check that location is on and try again."
+                    location.isAndroidEmulatorDefaultLocation() ->
+                        error = "Set your emulator location to HKU or your current position, then try again."
                     !location.hasUsableAccuracy() ->
                         error = "Your location is too approximate. Move to an open area and try again."
                     else -> onLocation(coordinates)
@@ -94,12 +99,25 @@ internal fun Context.hasLocationPermission(): Boolean = hasPreciseLocationPermis
 
 internal suspend fun getLocationForDistances(context: Context): DistanceOrigin? {
     val location = getCurrentLocation(context, requirePrecise = false) ?: return null
+    if (location.isAndroidEmulatorDefaultLocation()) return null
     val coordinates = Coordinates.from(location.latitude, location.longitude) ?: return null
     return DistanceOrigin(coordinates, !context.hasPreciseLocationPermission() || !location.hasUsableAccuracy())
 }
 
 private fun Location.hasUsableAccuracy(): Boolean =
     hasAccuracy() && accuracy <= MAX_LOCATION_ACCURACY_METERS
+
+private fun Location.isAndroidEmulatorDefaultLocation(): Boolean {
+    val result = FloatArray(1)
+    Location.distanceBetween(
+        latitude,
+        longitude,
+        EMULATOR_DEFAULT_LATITUDE,
+        EMULATOR_DEFAULT_LONGITUDE,
+        result,
+    )
+    return result[0] <= EMULATOR_DEFAULT_RADIUS_METERS
+}
 
 private suspend fun getCurrentLocation(context: Context, requirePrecise: Boolean = true): Location? {
     val hasPrecisePermission = context.hasPreciseLocationPermission()

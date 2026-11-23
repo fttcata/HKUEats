@@ -1,5 +1,6 @@
 package com.example.hkueats.data
 
+import androidx.annotation.DrawableRes
 import java.util.UUID
 
 private const val DEFAULT_RESTAURANT_CUISINE = "Unspecified"
@@ -34,6 +35,7 @@ data class Restaurant(
     val price: String,
     val reviews: List<Review>,
     val coordinates: Coordinates? = null,
+    @DrawableRes val imageResId: Int? = null,
 )
 
 interface RestaurantRepository {
@@ -66,6 +68,7 @@ class MockRestaurantRepository : RestaurantRepository {
             cuisine = "Hong Kong",
             location = "HKU Main Campus",
             coordinates = Coordinates.from(22.28271, 114.13914),
+            imageResId = com.example.hkueats.R.drawable.cym_canteen,
             rating = 4.4,
             price = "$$",
             reviews = listOf(
@@ -92,6 +95,7 @@ class MockRestaurantRepository : RestaurantRepository {
             cuisine = "Cafe",
             location = "HKU Main Campus",
             coordinates = Coordinates.from(22.28317, 114.13590),
+            imageResId = com.example.hkueats.R.drawable.starbucks_composite,
             rating = 4.6,
             price = "$$",
             reviews = listOf(
