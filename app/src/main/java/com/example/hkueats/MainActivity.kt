@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -44,6 +45,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -65,15 +67,14 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
 import com.example.hkueats.data.AppContainer
 import com.example.hkueats.data.AddressResult
 import com.example.hkueats.data.AddressSearchService
 import com.example.hkueats.data.AddressSuggestion
 import com.example.hkueats.data.CampusPlace
 import com.example.hkueats.data.Coordinates
-import com.example.hkueats.data.GoogleMapsConfig
 import com.example.hkueats.data.Restaurant
+import com.example.hkueats.data.RestaurantSaveException
 import com.example.hkueats.data.Review
 import com.example.hkueats.data.UserLoginResult
 import com.example.hkueats.data.loadCampusPlaces
@@ -85,6 +86,7 @@ import kotlinx.coroutines.CancellationException
 private val restaurantRepository = AppContainer.restaurantRepository
 private val userRepository = AppContainer.userRepository
 private const val NEARBY_RADIUS_METERS = 500
+private const val QUICK_TRIP_MAX_WALK_MINUTES = 5.0
 
 private enum class Screen { Login, Home, Details, AddReview, AddRestaurant, Account }
 
@@ -277,6 +279,8 @@ private fun HomeScreen(
     var query by remember { mutableStateOf("") }
     var selectedCuisine by remember { mutableStateOf("All") }
     var selectedLocation by remember { mutableStateOf("All") }
+    var showQuickTrip by remember { mutableStateOf(false) }
+    var quickTripOrigin by remember { mutableStateOf<Coordinates?>(null) }
     var nearbyOrigin by remember { mutableStateOf<Coordinates?>(null) }
     var allRestaurantsOrigin by remember { mutableStateOf<DistanceOrigin?>(null) }
     val context = LocalContext.current
@@ -284,6 +288,9 @@ private fun HomeScreen(
     val locationRequest = rememberCurrentLocationRequest { coordinates ->
         nearbyOrigin = coordinates
         allRestaurantsOrigin = DistanceOrigin(coordinates)
+    }
+    val quickTripLocationRequest = rememberCurrentLocationRequest { coordinates ->
+        quickTripOrigin = coordinates
     }
     LaunchedEffect(lifecycleState, selectedLocation, nearbyOrigin) {
         if (lifecycleState != Lifecycle.State.RESUMED) return@LaunchedEffect
@@ -328,6 +335,17 @@ private fun HomeScreen(
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
+        OutlinedButton(
+            onClick = {
+                showQuickTrip = true
+                quickTripOrigin = null
+                quickTripLocationRequest.launch()
+            },
+            enabled = !quickTripLocationRequest.isLoading,
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        ) {
+            Text(if (quickTripLocationRequest.isLoading) "Finding your location…" else "⚡ Quick Trip · under 5 min walk")
+        }
         Text("Cuisine", style = MaterialTheme.typography.labelLarge)
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -390,7 +408,74 @@ private fun HomeScreen(
             }
         }
     }
+
+    if (showQuickTrip) {
+        val quickTripRestaurants = quickTripOrigin?.let { origin ->
+            allRestaurants.mapNotNull { restaurant ->
+                val distance = restaurant.coordinates?.distanceTo(origin) ?: return@mapNotNull null
+                val walkMinutes = estimatedQuickTripWalkMinutes(distance)
+                if (walkMinutes >= QUICK_TRIP_MAX_WALK_MINUTES) return@mapNotNull null
+                QuickTripResult(restaurant, distance, walkMinutes)
+            }.sortedWith(compareBy<QuickTripResult> { it.walkMinutes }.thenByDescending { it.restaurant.rating })
+        }.orEmpty()
+
+        AlertDialog(
+            onDismissRequest = { showQuickTrip = false },
+            title = { Text("Quick Trip") },
+            text = {
+                Column(
+                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Nearby places with an estimated walk under 5 minutes.")
+                    Text("Walk times are approximate and based on distance; actual routes may vary.", style = MaterialTheme.typography.bodySmall)
+                    when {
+                        quickTripOrigin == null -> Text(
+                            if (quickTripLocationRequest.isLoading) "Getting your live location…"
+                            else "Your live location is needed to find a quick trip.",
+                        )
+                        quickTripRestaurants.isEmpty() -> Text("No restaurants with location data are under a 5-minute walk from here.")
+                        else -> quickTripRestaurants.forEach { trip ->
+                            Card(
+                                onClick = {
+                                    showQuickTrip = false
+                                    onRestaurantClick(trip.restaurant)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(Modifier.padding(12.dp)) {
+                                    Text(trip.restaurant.name, style = MaterialTheme.typography.titleMedium)
+                                    Text("Under 5 min walk · ${trip.distanceMeters.roundToInt()} m · ${trip.restaurant.price} · ★ ${trip.restaurant.rating}")
+                                    Text(trip.restaurant.location, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                    quickTripLocationRequest.error?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                if (quickTripOrigin == null && !quickTripLocationRequest.isLoading) {
+                    TextButton(onClick = { quickTripLocationRequest.launch() }) { Text("Try again") }
+                } else {
+                    TextButton(onClick = { showQuickTrip = false }) { Text("Done") }
+                }
+            },
+            dismissButton = { TextButton(onClick = { showQuickTrip = false }) { Text("Close") } },
+        )
+    }
 }
+
+private data class QuickTripResult(
+    val restaurant: Restaurant,
+    val distanceMeters: Float,
+    val walkMinutes: Double,
+)
+
+private fun estimatedQuickTripWalkMinutes(distanceMeters: Float): Double =
+    distanceMeters * 1.3 / 80.0
 
 @Composable
 private fun RestaurantCard(
@@ -647,6 +732,7 @@ private fun AddRestaurantScreen(
     var buildingNotOnCampus by remember { mutableStateOf(false) }
     var addressSuggestions by remember { mutableStateOf<List<AddressSuggestion>>(emptyList()) }
     var addressResult by remember { mutableStateOf<AddressResult?>(null) }
+    var addressSearchError by remember { mutableStateOf<String?>(null) }
     var isResolvingAddress by remember { mutableStateOf(false) }
     var showSuggestions by remember { mutableStateOf(false) }
     var cuisine by remember { mutableStateOf("") }
@@ -670,21 +756,33 @@ private fun AddRestaurantScreen(
     val addressSuggestionsExpanded =
         buildingNotOnCampus && showSuggestions && addressSuggestions.isNotEmpty() && !isSubmitting
 
-    LaunchedEffect(buildingNotOnCampus, location, isSubmitting) {
-        if (!buildingNotOnCampus || isSubmitting || location.trim().length < 3) {
-            addressSuggestions = emptyList()
-            return@LaunchedEffect
+    fun searchExternalLocation() {
+        val query = location.trim()
+        if (query.length < 3) {
+            addressSearchError = "Enter at least three characters to search."
+            return
         }
-        if (!GoogleMapsConfig.isConfigured) {
-            addressSuggestions = emptyList()
-            return@LaunchedEffect
-        }
+        if (isResolvingAddress) return
 
-        delay(350)
-        addressSuggestions = try {
-            addressSearch.search(location.trim())
-        } catch (_: Exception) {
-            emptyList()
+        isResolvingAddress = true
+        addressSearchError = null
+        addressSuggestions = emptyList()
+        showSuggestions = false
+        coroutineScope.launch {
+            try {
+                addressSuggestions = addressSearch.search(query)
+                if (addressSuggestions.isEmpty()) {
+                    addressSearchError = "No matching places found in Hong Kong. Try a fuller name or address."
+                } else {
+                    showSuggestions = true
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                addressSearchError = "OpenStreetMap search failed. Check your connection and try again."
+            } finally {
+                isResolvingAddress = false
+            }
         }
     }
 
@@ -699,7 +797,7 @@ private fun AddRestaurantScreen(
         ) {
             Checkbox(
                 checked = buildingNotOnCampus,
-                enabled = !isSubmitting,
+                enabled = !isSubmitting && !isResolvingAddress,
                 onCheckedChange = { checked ->
                     buildingNotOnCampus = checked
                     location = ""
@@ -707,6 +805,7 @@ private fun AddRestaurantScreen(
                     currentCoordinates = null
                     addressResult = null
                     addressSuggestions = emptyList()
+                    addressSearchError = null
                     showSuggestions = false
                     errorMessage = null
                 },
@@ -724,15 +823,17 @@ private fun AddRestaurantScreen(
                     location = it
                     selectedPlace = null
                     addressResult = null
-                    showSuggestions = true
+                    addressSearchError = null
+                    addressSuggestions = emptyList()
+                    showSuggestions = false
                     errorMessage = null
                 },
                 label = {
-                    Text(if (buildingNotOnCampus) "Google Maps address" else "HKU building name")
+                    Text(if (buildingNotOnCampus) "Restaurant or address" else "HKU building name")
                 },
                 singleLine = true,
-                enabled = !isSubmitting,
-                modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable, enabled = !isSubmitting),
+                enabled = !isSubmitting && !isResolvingAddress,
+                modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable, enabled = !isSubmitting && !isResolvingAddress),
             )
             ExposedDropdownMenu(
                 expanded = if (buildingNotOnCampus) addressSuggestionsExpanded else suggestionsExpanded,
@@ -746,6 +847,7 @@ private fun AddRestaurantScreen(
                                 showSuggestions = false
                                 isResolvingAddress = true
                                 errorMessage = null
+                                addressSearchError = null
                                 coroutineScope.launch {
                                     try {
                                         val resolved = addressSearch.resolve(suggestion)
@@ -755,8 +857,10 @@ private fun AddRestaurantScreen(
                                             location = resolved.formattedAddress
                                             addressResult = resolved
                                         }
+                                    } catch (cancelled: CancellationException) {
+                                        throw cancelled
                                     } catch (_: Exception) {
-                                        errorMessage = "Could not find coordinates for this address."
+                                        errorMessage = "Could not use this result. Search again and choose another place."
                                     } finally {
                                         isResolvingAddress = false
                                     }
@@ -786,18 +890,26 @@ private fun AddRestaurantScreen(
             }
         }
         if (buildingNotOnCampus) {
-            if (!GoogleMapsConfig.isConfigured) {
+            OutlinedButton(
+                onClick = { searchExternalLocation() },
+                enabled = !isSubmitting && !isResolvingAddress,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            ) {
+                Text(if (isResolvingAddress) "Searching OpenStreetMap…" else "Search OpenStreetMap")
+            }
+            Text("© OpenStreetMap contributors", style = MaterialTheme.typography.bodySmall)
+            if (isResolvingAddress) {
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    "Google Maps address search needs GOOGLE_MAPS_API_KEY in local.properties.",
-                    color = MaterialTheme.colorScheme.error,
-                )
-            } else if (isResolvingAddress) {
-                Spacer(Modifier.height(8.dp))
-                Text("Finding address coordinates…", style = MaterialTheme.typography.bodySmall)
+                Text("Searching for places…", style = MaterialTheme.typography.bodySmall)
             } else if (addressResult != null) {
                 Spacer(Modifier.height(8.dp))
-                Text("Address confirmed", style = MaterialTheme.typography.bodySmall)
+                Text("Map location confirmed", style = MaterialTheme.typography.bodySmall)
+            } else if (addressSearchError != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(addressSearchError!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            } else if (location.trim().length >= 3 && addressSuggestions.isEmpty() && !isResolvingAddress) {
+                Spacer(Modifier.height(8.dp))
+                Text("Search for a restaurant or address, then choose a result to confirm its map pin.", style = MaterialTheme.typography.bodySmall)
             }
         } else if (selectedPlace == null) {
             val hasCurrentLocation = currentCoordinates != null
@@ -842,8 +954,8 @@ private fun AddRestaurantScreen(
                     cleanName.isBlank() -> errorMessage = "Enter a restaurant name."
                     cleanLocation.isBlank() ->
                         errorMessage = if (buildingNotOnCampus) "Enter an address." else "Enter a building name."
-                    buildingNotOnCampus && !GoogleMapsConfig.isConfigured ->
-                        errorMessage = "Google Maps address search is not configured."
+                    buildingNotOnCampus && addressResult == null ->
+                        errorMessage = "Search OpenStreetMap and select a restaurant or address before saving."
                     existingRestaurants.any { it.name.equals(cleanName, ignoreCase = true) } ->
                         errorMessage = "This restaurant is already listed."
                     isSubmitting -> Unit
@@ -851,7 +963,7 @@ private fun AddRestaurantScreen(
                         isSubmitting = true
                         errorMessage = try {
                             val resolvedAddress = if (buildingNotOnCampus) {
-                                addressResult ?: addressSearch.geocode(cleanLocation)
+                                addressResult
                             } else {
                                 null
                             }
@@ -883,6 +995,8 @@ private fun AddRestaurantScreen(
                             }
                         } catch (cancelled: CancellationException) {
                             throw cancelled
+                        } catch (error: RestaurantSaveException) {
+                            error.message ?: "Could not add this restaurant. Please try again."
                         } catch (_: Exception) {
                             "Could not add this restaurant. Please try again."
                         } finally {
@@ -891,7 +1005,7 @@ private fun AddRestaurantScreen(
                     }
                 }
             },
-            enabled = !isSubmitting && !locationRequest.isLoading,
+            enabled = !isSubmitting && !locationRequest.isLoading && !isResolvingAddress,
             modifier = Modifier.fillMaxWidth(),
         ) { Text(if (isSubmitting) "Adding…" else "Add restaurant") }
     }
