@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -44,6 +45,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -80,6 +82,7 @@ import com.example.hkueats.data.loadCampusPlaces
 import com.example.hkueats.data.suggestionsFor
 import com.example.hkueats.ui.theme.HKUEatsTheme
 import kotlin.math.roundToInt
+import kotlin.math.ceil
 import kotlinx.coroutines.CancellationException
 
 private val restaurantRepository = AppContainer.restaurantRepository
@@ -277,6 +280,9 @@ private fun HomeScreen(
     var query by remember { mutableStateOf("") }
     var selectedCuisine by remember { mutableStateOf("All") }
     var selectedLocation by remember { mutableStateOf("All") }
+    var showQuickPick by remember { mutableStateOf(false) }
+    var quickPickMinutes by remember { mutableStateOf(15) }
+    var quickPickPrice by remember { mutableStateOf("Any") }
     var nearbyOrigin by remember { mutableStateOf<Coordinates?>(null) }
     var allRestaurantsOrigin by remember { mutableStateOf<DistanceOrigin?>(null) }
     val context = LocalContext.current
@@ -328,6 +334,16 @@ private fun HomeScreen(
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
+        OutlinedButton(
+            onClick = {
+                showQuickPick = true
+                if (nearbyOrigin == null) locationRequest.launch()
+            },
+            enabled = !locationRequest.isLoading,
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        ) {
+            Text(if (locationRequest.isLoading) "Finding your location…" else "🍽  Quick pick for my break")
+        }
         Text("Cuisine", style = MaterialTheme.typography.labelLarge)
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -390,6 +406,105 @@ private fun HomeScreen(
             }
         }
     }
+
+    if (showQuickPick) {
+        val quickPicks = nearbyOrigin?.let { origin ->
+            restaurants
+                .filter { restaurant -> quickPickPrice == "Any" || priceTierValue(restaurant.price) <= priceTierValue(quickPickPrice) }
+                .mapNotNull { restaurant ->
+                    val distance = restaurant.coordinates?.distanceTo(origin) ?: return@mapNotNull null
+                    val walkMinutes = estimatedWalkMinutes(distance)
+                    if (walkMinutes > quickPickMinutes) return@mapNotNull null
+                    QuickPickResult(restaurant, distance, walkMinutes)
+                }
+                .sortedWith(compareBy<QuickPickResult> { it.walkMinutes }.thenByDescending { it.restaurant.rating })
+                .take(3)
+        }.orEmpty()
+
+        AlertDialog(
+            onDismissRequest = { showQuickPick = false },
+            title = { Text("Quick pick for your break") },
+            text = {
+                Column(
+                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Choose your one-way walking limit and price range.")
+                    Text("Walking times are estimates; meal time and opening hours aren’t included.", style = MaterialTheme.typography.bodySmall)
+                    Text("Walking limit", style = MaterialTheme.typography.labelLarge)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf(10, 15, 20, 30).forEach { minutes ->
+                            FilterChip(
+                                selected = quickPickMinutes == minutes,
+                                onClick = { quickPickMinutes = minutes },
+                                label = { Text("${minutes}m") },
+                            )
+                        }
+                    }
+                    Text("Price range", style = MaterialTheme.typography.labelLarge)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf("Any", "$", "$$", "$$$").forEach { price ->
+                            FilterChip(
+                                selected = quickPickPrice == price,
+                                onClick = { quickPickPrice = price },
+                                label = { Text(price) },
+                            )
+                        }
+                    }
+                    when {
+                        nearbyOrigin == null -> Text(
+                            if (locationRequest.isLoading) "Getting your location…" else "Allow location access to find nearby places.",
+                            color = if (locationRequest.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        quickPicks.isEmpty() -> Text("No restaurants with location data match those choices. Try a longer walk or a wider price range.")
+                        else -> {
+                            Text("Good matches", style = MaterialTheme.typography.titleSmall)
+                            quickPicks.forEach { pick ->
+                                Card(
+                                    onClick = {
+                                        showQuickPick = false
+                                        onRestaurantClick(pick.restaurant)
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Column(Modifier.padding(12.dp)) {
+                                        Text(pick.restaurant.name, style = MaterialTheme.typography.titleMedium)
+                                        Text("About ${pick.walkMinutes} min · ${pick.distanceMeters.roundToInt()} m · ${pick.restaurant.price} · ★ ${pick.restaurant.rating}")
+                                        Text(pick.restaurant.location, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    locationRequest.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                if (nearbyOrigin == null && !locationRequest.isLoading) {
+                    TextButton(onClick = { locationRequest.launch() }) { Text("Try location again") }
+                } else {
+                    TextButton(onClick = { showQuickPick = false }) { Text("Done") }
+                }
+            },
+            dismissButton = { TextButton(onClick = { showQuickPick = false }) { Text("Close") } },
+        )
+    }
+}
+
+private data class QuickPickResult(
+    val restaurant: Restaurant,
+    val distanceMeters: Float,
+    val walkMinutes: Int,
+)
+
+private fun estimatedWalkMinutes(distanceMeters: Float): Int =
+    ceil(distanceMeters * 1.3 / 80.0).toInt().coerceAtLeast(1)
+
+private fun priceTierValue(price: String): Int = when (price.count { it == '$' }) {
+    1 -> 1
+    2 -> 2
+    3 -> 3
+    else -> Int.MAX_VALUE
 }
 
 @Composable
