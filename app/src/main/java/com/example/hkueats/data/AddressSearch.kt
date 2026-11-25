@@ -1,12 +1,18 @@
 package com.example.hkueats.data
 
+import android.os.SystemClock
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.android.Android
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.request.accept
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.parameter
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.delay
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -14,6 +20,7 @@ import kotlinx.serialization.json.Json
 data class AddressSuggestion(
     val placeId: String,
     val description: String,
+    val coordinates: Coordinates,
 )
 
 data class AddressResult(
@@ -22,51 +29,17 @@ data class AddressResult(
 )
 
 @Serializable
-private data class PlaceAutocompleteResponse(
-    val predictions: List<PlacePrediction> = emptyList(),
+private data class NominatimPlace(
+    @SerialName("place_id") val placeId: Long = 0,
+    @SerialName("display_name") val displayName: String = "",
+    val lat: String = "",
+    val lon: String = "",
 )
 
-@Serializable
-private data class PlacePrediction(
-    @SerialName("place_id") val placeId: String = "",
-    val description: String = "",
-)
-
-@Serializable
-private data class PlaceDetailsResponse(
-    val result: PlaceDetailsResult? = null,
-)
-
-@Serializable
-private data class PlaceDetailsResult(
-    val geometry: PlaceGeometry? = null,
-    @SerialName("formatted_address") val formattedAddress: String = "",
-)
-
-@Serializable
-private data class GeocodingResponse(
-    val results: List<GeocodingResult> = emptyList(),
-)
-
-@Serializable
-private data class GeocodingResult(
-    val geometry: PlaceGeometry? = null,
-    @SerialName("formatted_address") val formattedAddress: String = "",
-)
-
-@Serializable
-private data class PlaceGeometry(
-    val location: PlaceLocation? = null,
-)
-
-@Serializable
-private data class PlaceLocation(
-    val lat: Double = 0.0,
-    val lng: Double = 0.0,
-)
-
+/** Public, keyless place lookup for the prototype's explicitly requested searches. */
 class AddressSearchService(
     private val httpClient: HttpClient = HttpClient(Android) {
+        expectSuccess = true
         install(ContentNegotiation) {
             json(
                 Json {
@@ -77,67 +50,50 @@ class AddressSearchService(
         }
     },
 ) {
+    private var lastRequestAtMillis = 0L
+    private val cache = mutableMapOf<String, List<AddressSuggestion>>()
+
     suspend fun search(query: String): List<AddressSuggestion> {
-        if (!GoogleMapsConfig.isConfigured) {
-            throw IllegalStateException("Google Maps API key is not configured.")
-        }
+        val normalizedQuery = query.trim()
+        require(normalizedQuery.length >= 3) { "Enter at least three characters to search." }
+        val cacheKey = normalizedQuery.lowercase()
+        cache[cacheKey]?.let { return it }
 
-        val response = httpClient
-            .get("https://maps.googleapis.com/maps/api/place/autocomplete/json") {
-                parameter("input", query)
-                parameter("types", "address")
-                parameter("key", GoogleMapsConfig.apiKey)
+        val waitMillis = MIN_REQUEST_INTERVAL_MS - (SystemClock.elapsedRealtime() - lastRequestAtMillis)
+        if (waitMillis > 0) delay(waitMillis)
+        lastRequestAtMillis = SystemClock.elapsedRealtime()
+
+        val places = httpClient
+            .get("https://nominatim.openstreetmap.org/search") {
+                header(HttpHeaders.UserAgent, USER_AGENT)
+                accept(ContentType.Application.Json)
+                parameter("q", normalizedQuery)
+                parameter("format", "jsonv2")
+                parameter("countrycodes", "hk")
+                parameter("limit", 5)
+                parameter("accept-language", "en")
             }
-            .body<PlaceAutocompleteResponse>()
+            .body<List<NominatimPlace>>()
 
-        return response.predictions
-            .filter { it.placeId.isNotBlank() && it.description.isNotBlank() }
-            .map { AddressSuggestion(it.placeId, it.description) }
-            .take(5)
-    }
-
-    suspend fun resolve(suggestion: AddressSuggestion): AddressResult? {
-        if (!GoogleMapsConfig.isConfigured) return null
-
-        val details = httpClient
-            .get("https://maps.googleapis.com/maps/api/place/details/json") {
-                parameter("place_id", suggestion.placeId)
-                parameter("fields", "geometry,formatted_address")
-                parameter("key", GoogleMapsConfig.apiKey)
-            }
-            .body<PlaceDetailsResponse>()
-            .result
-
-        val location = details?.geometry?.location
-        val coordinates = location?.let { Coordinates.from(it.lat, it.lng) }
-        if (coordinates != null) {
-            return AddressResult(
-                formattedAddress = details?.formattedAddress?.ifBlank { suggestion.description }
-                    ?: suggestion.description,
+        val results = places.mapNotNull { place ->
+            val coordinates = Coordinates.from(place.lat.toDoubleOrNull(), place.lon.toDoubleOrNull())
+                ?: return@mapNotNull null
+            if (place.displayName.isBlank()) return@mapNotNull null
+            AddressSuggestion(
+                placeId = place.placeId.toString(),
+                description = place.displayName,
                 coordinates = coordinates,
             )
         }
-
-        return geocode(suggestion.description)
+        cache[cacheKey] = results
+        return results
     }
 
-    suspend fun geocode(address: String): AddressResult? {
-        if (!GoogleMapsConfig.isConfigured) return null
+    fun resolve(suggestion: AddressSuggestion): AddressResult =
+        AddressResult(suggestion.description, suggestion.coordinates)
 
-        val result = httpClient
-            .get("https://maps.googleapis.com/maps/api/geocode/json") {
-                parameter("address", address)
-                parameter("key", GoogleMapsConfig.apiKey)
-            }
-            .body<GeocodingResponse>()
-            .results
-            .firstOrNull()
-
-        val location = result?.geometry?.location ?: return null
-        val coordinates = Coordinates.from(location.lat, location.lng) ?: return null
-        return AddressResult(
-            formattedAddress = result.formattedAddress.ifBlank { address },
-            coordinates = coordinates,
-        )
+    private companion object {
+        const val MIN_REQUEST_INTERVAL_MS = 1_100L
+        const val USER_AGENT = "HKUEats/0.1 (Android student project)"
     }
 }

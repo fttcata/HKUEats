@@ -10,6 +10,7 @@ import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
@@ -20,6 +21,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+
+class RestaurantSaveException(message: String) : Exception(message)
 
 @Serializable
 private data class RestaurantRow(
@@ -209,9 +212,27 @@ class SupabaseRestaurantRepository(
                 setBody(restaurantInsert)
             }
 
-            if (response.status.isSuccess()) restaurantInsert.toDomain(emptyList()) else null
+            if (response.status.isSuccess()) {
+                restaurantInsert.toDomain(emptyList())
+            } else {
+                val responseText = response.bodyAsText()
+                when {
+                    responseText.contains("latitude", ignoreCase = true) ||
+                            responseText.contains("longitude", ignoreCase = true) ->
+                        throw RestaurantSaveException(
+                            "Supabase is missing restaurant coordinate columns. Apply database/add_restaurant_coordinates.sql, then try again.",
+                        )
+                    responseText.contains("23505") || responseText.contains("duplicate key", ignoreCase = true) ->
+                        throw RestaurantSaveException("A restaurant with this name is already listed.")
+                    else -> throw RestaurantSaveException(
+                        "Supabase rejected the restaurant (HTTP ${response.status.value}). Check the database insert policy and schema.",
+                    )
+                }
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
+        } catch (error: RestaurantSaveException) {
+            throw error
         } catch (_: Exception) {
             null
         }
