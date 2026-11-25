@@ -187,6 +187,8 @@ class MockRestaurantRepository : RestaurantRepository {
         )
         restaurants.add(newRestaurant)
         return newRestaurant
+            // The offline demo repository has no remote storage; callers keep the local photo URI.
+        override suspend fun uploadReviewImage(bytes: ByteArray, mimeType: String): String? = null
     }
 }
 
