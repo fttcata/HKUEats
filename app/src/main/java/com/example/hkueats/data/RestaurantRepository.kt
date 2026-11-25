@@ -2,6 +2,7 @@ package com.example.hkueats.data
 
 import androidx.annotation.DrawableRes
 import java.util.UUID
+import kotlin.math.roundToInt
 
 private const val DEFAULT_RESTAURANT_CUISINE = "Unspecified"
 private const val DEFAULT_RESTAURANT_PRICE = "$$"
@@ -150,7 +151,8 @@ class MockRestaurantRepository : RestaurantRepository {
             visitDate = visitDate,
             imageUri = imageUri,
         )
-        val updatedRating = updatedReviews.map { it.rating }.average()
+        val rawAverage = updatedReviews.map { it.rating }.average()
+        val updatedRating = (rawAverage * 10.0).roundToInt() / 10.0
         val updatedRestaurant = restaurant.copy(
             rating = updatedRating,
             reviews = updatedReviews,

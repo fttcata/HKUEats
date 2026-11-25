@@ -89,6 +89,8 @@ private val restaurantRepository = AppContainer.restaurantRepository
 private val userRepository = AppContainer.userRepository
 private const val NEARBY_RADIUS_METERS = 500
 
+private fun Double.formatRating(): String = String.format(Locale.US, "%.1f", this)
+
 private enum class Screen { Login, Home, Details, AddReview, AddRestaurant, Account }
 
 class MainActivity : ComponentActivity() {
@@ -106,7 +108,11 @@ private fun HKUEatsApp() {
     var restaurants by remember { mutableStateOf<List<Restaurant>>(emptyList()) }
 
     LaunchedEffect(Unit) {
-        restaurants = restaurantRepository.getRestaurants()
+        try {
+            restaurants = restaurantRepository.getRestaurants()
+        } catch (_: Throwable) {
+            // Ignore error and prevent crash on launch
+        }
     }
 
     when (screen) {
@@ -469,7 +475,7 @@ private fun HomeScreen(
                                 ) {
                                     Column(Modifier.padding(12.dp)) {
                                         Text(pick.restaurant.name, style = MaterialTheme.typography.titleMedium)
-                                        Text("About ${pick.walkMinutes} min · ${pick.distanceMeters.roundToInt()} m · ${pick.restaurant.price} · ★ ${pick.restaurant.rating}")
+                                        Text("About ${pick.walkMinutes} min · ${pick.distanceMeters.roundToInt()} m · ${pick.restaurant.price} · ★ ${pick.restaurant.rating.formatRating()}")
                                         Text(pick.restaurant.location, style = MaterialTheme.typography.bodySmall)
                                     }
                                 }
@@ -530,7 +536,7 @@ private fun RestaurantCard(
             Text(restaurant.name, style = MaterialTheme.typography.titleLarge)
             Text("${restaurant.cuisine} · ${restaurant.price}", style = MaterialTheme.typography.bodyMedium)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("★ ${restaurant.rating}", style = MaterialTheme.typography.bodyLarge)
+                Text("★ ${restaurant.rating.formatRating()}", style = MaterialTheme.typography.bodyLarge)
                 Text("  ·  ${restaurant.location}", style = MaterialTheme.typography.bodyMedium)
             }
             if (distanceMeters != null) {
@@ -579,7 +585,7 @@ private fun RestaurantDetailsScreen(
                 }
                 Text("${restaurant.cuisine} · ${restaurant.price}", style = MaterialTheme.typography.titleMedium)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("★ ${restaurant.rating}", style = MaterialTheme.typography.headlineSmall)
+                    Text("★ ${restaurant.rating.formatRating()}", style = MaterialTheme.typography.headlineSmall)
                     Text("  Based on ${restaurant.reviews.size} student reviews")
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 12.dp)) {
@@ -594,7 +600,7 @@ private fun RestaurantDetailsScreen(
                 Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                     Column(Modifier.padding(12.dp)) {
                         Text(review.author, style = MaterialTheme.typography.titleMedium)
-                        Text("★ ${review.rating}", style = MaterialTheme.typography.bodyLarge)
+                        Text("★ ${review.rating.formatRating()}", style = MaterialTheme.typography.bodyLarge)
                         if (review.visitDate.isNotBlank()) {
                             Text("Visited ${review.visitDate}", style = MaterialTheme.typography.bodySmall)
                         }
@@ -1084,7 +1090,7 @@ private fun AccountScreen(
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(
-                            "$restaurantName · ★ ${review.rating}",
+                            "$restaurantName · ★ ${review.rating.formatRating()}",
                             style = MaterialTheme.typography.titleMedium
                         )
                         if (review.visitDate.isNotBlank()) {

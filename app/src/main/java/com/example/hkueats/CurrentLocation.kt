@@ -142,9 +142,9 @@ private suspend fun requestCurrentLocation(context: Context, hasPrecisePermissio
     val manager = context.getSystemService(LocationManager::class.java) ?: return null
     val enabledProviders = manager.getProviders(true)
     val providers = if (hasPrecisePermission) {
-        listOf(LocationManager.GPS_PROVIDER, LocationManager.FUSED_PROVIDER, LocationManager.NETWORK_PROVIDER)
+        listOf(LocationManager.GPS_PROVIDER, "fused", LocationManager.NETWORK_PROVIDER)
     } else {
-        listOf(LocationManager.FUSED_PROVIDER, LocationManager.NETWORK_PROVIDER)
+        listOf("fused", LocationManager.NETWORK_PROVIDER)
     }
     val provider = providers.firstOrNull { it in enabledProviders } ?: return null
 

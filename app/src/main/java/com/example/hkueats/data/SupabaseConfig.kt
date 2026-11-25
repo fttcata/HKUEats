@@ -10,5 +10,8 @@ object SupabaseConfig {
         get() = BuildConfig.SUPABASE_ANON_KEY
 
     val isConfigured: Boolean
-        get() = baseUrl.isNotBlank() && apiKey.isNotBlank()
+        get() = baseUrl.isNotBlank() &&
+                apiKey.isNotBlank() &&
+                !baseUrl.contains("your-project.supabase.co") &&
+                apiKey != "your_supabase_anon_key_here"
 }
