@@ -240,4 +240,35 @@ class SupabaseRestaurantRepository(
             null
         }
     }
+    override suspend fun uploadReviewImage(bytes: ByteArray, mimeType: String): String? {
+        if (!SupabaseConfig.isConfigured) return null
+
+        val extension = when (mimeType.lowercase(Locale.ROOT)) {
+            "image/png" -> "png"
+            "image/webp" -> "webp"
+            "image/gif" -> "gif"
+            else -> "jpg"
+        }
+        val objectPath = "${UUID.randomUUID()}.$extension"
+
+        return try {
+            val response = httpClient.post(
+                "${SupabaseConfig.baseUrl}/storage/v1/object/$REVIEW_IMAGE_BUCKET/$objectPath",
+            ) {
+                header(HttpHeaders.Authorization, "Bearer ${SupabaseConfig.apiKey}")
+                header("apikey", SupabaseConfig.apiKey)
+                contentType(ContentType.parse(mimeType))
+                setBody(bytes)
+            }
+            if (response.status.isSuccess()) {
+                "${SupabaseConfig.baseUrl}/storage/v1/object/public/$REVIEW_IMAGE_BUCKET/$objectPath"
+            } else {
+                null
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+    }
 }
