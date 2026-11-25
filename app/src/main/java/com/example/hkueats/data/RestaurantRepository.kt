@@ -59,6 +59,7 @@ interface RestaurantRepository {
         cuisine: String = DEFAULT_RESTAURANT_CUISINE,
         price: String = DEFAULT_RESTAURANT_PRICE,
     ): Restaurant?
+    suspend fun uploadReviewImage(bytes: ByteArray, mimeType: String): String?
 }
 
 class MockRestaurantRepository : RestaurantRepository {
