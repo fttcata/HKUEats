@@ -37,6 +37,7 @@ private data class RestaurantRow(
     val rating: Double = 0.0,
     val latitude: Double? = null,
     val longitude: Double? = null,
+    @SerialName("image_uri") val imageUri: String? = null,
 )
 
 @Serializable
@@ -66,6 +67,7 @@ private fun RestaurantRow.toDomain(reviews: List<Review>): Restaurant = Restaura
             com.example.hkueats.R.drawable.starbucks_composite
         else -> null
     },
+    imageUri = imageUri,
 )
 
 private fun ReviewRow.toDomain(): Review = Review(
@@ -188,9 +190,10 @@ class SupabaseRestaurantRepository(
         coordinates: Coordinates,
         cuisine: String,
         price: String,
+        photo: RestaurantPhotoUpload?,
     ): Restaurant? {
         if (!SupabaseConfig.isConfigured) {
-            return fallbackRepository.addRestaurant(name, location, coordinates, cuisine, price)
+            return fallbackRepository.addRestaurant(name, location, coordinates, cuisine, price, photo)
         }
 
         val cleanName = name.trim()
@@ -198,6 +201,7 @@ class SupabaseRestaurantRepository(
         if (cleanName.isBlank() || cleanLocation.isBlank()) return null
 
         return try {
+            val imageUri = photo?.let { uploadRestaurantPhoto(it) }
             val restaurantInsert = RestaurantRow(
                 id = UUID.randomUUID().toString(),
                 name = cleanName,
@@ -206,6 +210,7 @@ class SupabaseRestaurantRepository(
                 price = price.ifBlank { "$$" },
                 latitude = coordinates.latitude,
                 longitude = coordinates.longitude,
+                imageUri = imageUri,
             )
 
             val response = httpClient.post("${SupabaseConfig.baseUrl}/rest/v1/restaurants") {
@@ -220,6 +225,10 @@ class SupabaseRestaurantRepository(
             } else {
                 val responseText = response.bodyAsText()
                 when {
+                    responseText.contains("image_uri", ignoreCase = true) ->
+                        throw RestaurantSaveException(
+                            "Supabase is missing the restaurant image column. Apply database/add_restaurant_photo_storage.sql, then try again.",
+                        )
                     responseText.contains("latitude", ignoreCase = true) ||
                             responseText.contains("longitude", ignoreCase = true) ->
                         throw RestaurantSaveException(
@@ -240,6 +249,30 @@ class SupabaseRestaurantRepository(
             null
         }
     }
+    private suspend fun uploadRestaurantPhoto(photo: RestaurantPhotoUpload): String {
+        val extension = when (photo.contentType.lowercase(Locale.ROOT)) {
+            "image/png" -> "png"
+            "image/webp" -> "webp"
+            "image/gif" -> "gif"
+            else -> "jpg"
+        }
+        val objectPath = "${UUID.randomUUID()}.$extension"
+        val response = httpClient.post(
+            "${SupabaseConfig.baseUrl}/storage/v1/object/restaurant-images/$objectPath",
+        ) {
+            header(HttpHeaders.Authorization, "Bearer ${SupabaseConfig.apiKey}")
+            header("apikey", SupabaseConfig.apiKey)
+            contentType(ContentType.parse(photo.contentType))
+            setBody(photo.bytes)
+        }
+        if (!response.status.isSuccess()) {
+            throw RestaurantSaveException(
+                "Supabase could not upload the photo (HTTP ${response.status.value}). Apply database/add_restaurant_photo_storage.sql and check the Storage upload policy.",
+            )
+        }
+        return "${SupabaseConfig.baseUrl}/storage/v1/object/public/restaurant-images/$objectPath"
+    }
+
     override suspend fun uploadReviewImage(bytes: ByteArray, mimeType: String): String? {
         if (!SupabaseConfig.isConfigured) return null
 

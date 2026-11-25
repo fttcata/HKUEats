@@ -1,5 +1,11 @@
 package com.example.hkueats.ui.screens
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.example.hkueats.data.AddressResult
 import com.example.hkueats.data.AddressSearchService
 import com.example.hkueats.data.AddressSuggestion
@@ -38,12 +45,15 @@ import com.example.hkueats.data.AppContainer
 import com.example.hkueats.data.CampusPlace
 import com.example.hkueats.data.Coordinates
 import com.example.hkueats.data.Restaurant
+import com.example.hkueats.data.RestaurantPhotoUpload
 import com.example.hkueats.data.RestaurantSaveException
 import com.example.hkueats.data.loadCampusPlaces
 import com.example.hkueats.data.suggestionsFor
 import com.example.hkueats.rememberCurrentLocationRequest
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,8 +78,23 @@ fun AddRestaurantScreen(
     var showSuggestions by remember { mutableStateOf(false) }
     var cuisine by remember { mutableStateOf("") }
     var price by remember { mutableStateOf("$$") }
+    var selectedPhotoUri by remember { mutableStateOf<Uri?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isSubmitting by remember { mutableStateOf(false) }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            } catch (_: SecurityException) {
+                // Some providers do not grant persistable permissions; the picked URI is still readable now.
+            }
+            selectedPhotoUri = uri
+            errorMessage = null
+        }
+    }
     val locationRequest = rememberCurrentLocationRequest { coordinates ->
         if (selectedPlace == null) {
             currentCoordinates = coordinates
@@ -226,12 +251,12 @@ fun AddRestaurantScreen(
                 enabled = !isSubmitting && !isResolvingAddress,
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
             ) {
-                Text(if (isResolvingAddress) "Searching OpenStreetMap…" else "Search OpenStreetMap")
+                Text(if (isResolvingAddress) "Searching OpenStreetMap?" else "Search OpenStreetMap")
             }
-            Text("© OpenStreetMap contributors", style = MaterialTheme.typography.bodySmall)
+            Text("? OpenStreetMap contributors", style = MaterialTheme.typography.bodySmall)
             if (isResolvingAddress) {
                 Spacer(Modifier.height(8.dp))
-                Text("Searching for places…", style = MaterialTheme.typography.bodySmall)
+                Text("Searching for places?", style = MaterialTheme.typography.bodySmall)
             } else if (addressResult != null) {
                 Spacer(Modifier.height(8.dp))
                 Text("Map location confirmed", style = MaterialTheme.typography.bodySmall)
@@ -256,7 +281,7 @@ fun AddRestaurantScreen(
                 Text(
                     when {
                         hasCurrentLocation -> "Remove current location"
-                        locationRequest.isLoading -> "Finding location…"
+                        locationRequest.isLoading -> "Finding location?"
                         else -> "Use my current location"
                     },
                 )
@@ -269,6 +294,38 @@ fun AddRestaurantScreen(
         }
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(cuisine, { cuisine = it }, label = { Text("Cuisine (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(12.dp))
+        Text("Photo (optional)", style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.height(8.dp))
+        selectedPhotoUri?.let { uri ->
+            AsyncImage(
+                model = uri,
+                contentDescription = "Selected restaurant photo",
+                modifier = Modifier.fillMaxWidth().height(180.dp),
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = { photoPicker.launch(arrayOf("image/*")) },
+                enabled = !isSubmitting,
+            ) {
+                Text(if (selectedPhotoUri == null) "Choose photo" else "Change photo")
+            }
+            if (selectedPhotoUri != null) {
+                OutlinedButton(
+                    onClick = { selectedPhotoUri = null },
+                    enabled = !isSubmitting,
+                ) {
+                    Text("Remove photo")
+                }
+            }
+        }
+        Text(
+            "Choose an image from your device. It is saved with the restaurant when Supabase is configured.",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 4.dp),
+        )
         Spacer(Modifier.height(12.dp))
         Text("Price range", style = MaterialTheme.typography.labelLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
@@ -311,18 +368,22 @@ fun AddRestaurantScreen(
                             if (coordinates == null) {
                                 "Select a valid address or add a location pin before saving."
                             } else {
-                            val restaurant = restaurantRepository.addRestaurant(
-                                name = cleanName,
-                                location = finalLocation,
-                                coordinates = coordinates,
-                                cuisine = cuisine.trim().ifBlank { "Unspecified" },
-                                price = price,
-                            )
-                            if (restaurant == null) "Could not add this restaurant. Please try again."
-                            else {
-                                onAdded(restaurant)
-                                null
-                            }
+                                val photo = selectedPhotoUri?.let { uri ->
+                                    context.readRestaurantPhoto(uri)
+                                }
+                                val restaurant = restaurantRepository.addRestaurant(
+                                    name = cleanName,
+                                    location = finalLocation,
+                                    coordinates = coordinates,
+                                    cuisine = cuisine.trim().ifBlank { "Unspecified" },
+                                    price = price,
+                                    photo = photo,
+                                )
+                                if (restaurant == null) "Could not add this restaurant. Please try again."
+                                else {
+                                    onAdded(restaurant)
+                                    null
+                                }
                             }
                         } catch (cancelled: CancellationException) {
                             throw cancelled
@@ -338,6 +399,20 @@ fun AddRestaurantScreen(
             },
             enabled = !isSubmitting && !locationRequest.isLoading && !isResolvingAddress,
             modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (isSubmitting) "Adding…" else "Add restaurant") }
+        ) { Text(if (isSubmitting) "Adding?" else "Add restaurant") }
     }
+}
+
+private suspend fun Context.readRestaurantPhoto(uri: Uri): RestaurantPhotoUpload = withContext(Dispatchers.IO) {
+    val contentType = contentResolver.getType(uri)?.takeIf { it.startsWith("image/") } ?: "image/jpeg"
+    val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        ?: throw RestaurantSaveException("Could not read the selected image.")
+    if (bytes.isEmpty()) {
+        throw RestaurantSaveException("The selected image is empty.")
+    }
+    RestaurantPhotoUpload(
+        sourceUri = uri.toString(),
+        bytes = bytes,
+        contentType = contentType,
+    )
 }

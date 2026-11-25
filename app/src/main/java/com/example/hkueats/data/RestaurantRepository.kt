@@ -37,6 +37,13 @@ data class Restaurant(
     val reviews: List<Review>,
     val coordinates: Coordinates? = null,
     @DrawableRes val imageResId: Int? = null,
+    val imageUri: String? = null,
+)
+
+data class RestaurantPhotoUpload(
+    val sourceUri: String,
+    val bytes: ByteArray,
+    val contentType: String,
 )
 
 interface RestaurantRepository {
@@ -58,6 +65,7 @@ interface RestaurantRepository {
         coordinates: Coordinates,
         cuisine: String = DEFAULT_RESTAURANT_CUISINE,
         price: String = DEFAULT_RESTAURANT_PRICE,
+        photo: RestaurantPhotoUpload? = null,
     ): Restaurant?
     suspend fun uploadReviewImage(bytes: ByteArray, mimeType: String): String?
 }
@@ -168,6 +176,7 @@ class MockRestaurantRepository : RestaurantRepository {
         coordinates: Coordinates,
         cuisine: String,
         price: String,
+        photo: RestaurantPhotoUpload?,
     ): Restaurant? {
         val trimmedName = name.trim()
         val trimmedLocation = location.trim()
@@ -184,13 +193,14 @@ class MockRestaurantRepository : RestaurantRepository {
             rating = 0.0,
             price = price.ifBlank { DEFAULT_RESTAURANT_PRICE },
             reviews = emptyList(),
+            imageUri = photo?.sourceUri,
         )
         restaurants.add(newRestaurant)
         return newRestaurant
-            // The offline demo repository has no remote storage; callers keep the local photo URI.
     }
-        override suspend fun uploadReviewImage(bytes: ByteArray, mimeType: String): String? = null
-    
+
+    // The offline demo repository has no remote storage; callers keep the local photo URI.
+    override suspend fun uploadReviewImage(bytes: ByteArray, mimeType: String): String? = null
 }
 
 object AppContainer {

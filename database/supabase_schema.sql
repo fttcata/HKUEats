@@ -12,6 +12,7 @@ create table if not exists public.restaurants (
     longitude double precision,
     price text not null default '$$',
     rating double precision not null default 0,
+    image_uri text,
     created_at timestamptz not null default now(),
     constraint restaurants_valid_coordinates check (
         (latitude is null and longitude is null)
@@ -71,3 +72,18 @@ create policy "Public profiles are viewable by everyone"
 create policy "Users can insert their own profile"
     on public.profiles for insert
     to public with check (auth.uid() = id);
+
+-- Restaurant photos uploaded from the Add Restaurant screen.
+insert into storage.buckets (id, name, public)
+values ('restaurant-images', 'restaurant-images', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists "Allow public read access to restaurant images" on storage.objects;
+create policy "Allow public read access to restaurant images"
+    on storage.objects for select
+    to public using (bucket_id = 'restaurant-images');
+
+drop policy if exists "Allow public upload to restaurant images" on storage.objects;
+create policy "Allow public upload to restaurant images"
+    on storage.objects for insert
+    to public with check (bucket_id = 'restaurant-images');

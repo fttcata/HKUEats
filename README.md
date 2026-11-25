@@ -60,7 +60,14 @@ For a new project, run [supabase_schema.sql](database/supabase_schema.sql). For 
 existing project, apply [add_restaurant_coordinates.sql](database/add_restaurant_coordinates.sql)
 before submitting new places. Existing places without coordinates still appear
 in regular search. To load matching demo locations into Supabase, run
-[seed_demo_restaurants.sql](database/seed_demo_restaurants.sql). Demo locations
+[seed_demo_restaurants.sql](database/seed_demo_restaurants.sql).
+
+To persist restaurant photos uploaded from the Add Restaurant screen, also apply
+[add_restaurant_photo_storage.sql](database/add_restaurant_photo_storage.sql) to an
+existing project. It adds `restaurants.image_uri` and creates the public
+`restaurant-images` Storage bucket/policies.
+
+Demo locations
 use the [HKU catering directory](https://catering.hku.hk/en/eateries/) and
 OpenStreetMap points for [Chong Yuet Ming Amenities Centre](https://www.openstreetmap.org/way/182203652),
 [Composite Building](https://www.openstreetmap.org/way/182172765),
