@@ -17,10 +17,13 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import java.util.UUID
+import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+
+private const val REVIEW_IMAGE_BUCKET = "review-images"
 
 class RestaurantSaveException(message: String) : Exception(message)
 
